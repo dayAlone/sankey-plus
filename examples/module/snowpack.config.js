@@ -4,4 +4,7 @@ module.exports = {
     "": "/",
   },
   workspaceRoot: "../../",
+  packageOptions: {
+    namedExports: ["d3"],
+  },
 };

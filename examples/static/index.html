@@ -7,8 +7,10 @@
   </head>
 
   <body>
-    <h1>Sankey Plus – with circular links</h1>
-    <!-- Container – the chart will be loaded in this container -->
+    <h1>Sankey Plus - with circular links and link types</h1>
+    <!-- Legend -->
+    <div id="legend" style="margin-bottom: 15px; display: flex; gap: 20px;"></div>
+    <!-- Container - the chart will be loaded in this container -->
     <div id="chart"></div>
 
     <script>
@@ -37,46 +39,47 @@
       ];
 
       let links = [
-        { source: "startA", target: "process8", value: 20, optimal: "yes" },
-        { source: "startA", target: "process5", value: 20, optimal: "yes" },
-        { source: "startA", target: "process6", value: 20, optimal: "yes" },
-        { source: "startB", target: "process1", value: 15, optimal: "yes" },
-        { source: "startB", target: "process5", value: 15, optimal: "yes" },
-        { source: "process1", target: "process4", value: 30, optimal: "yes" },
-        { source: "process4", target: "process1", value: 10, optimal: "yes" },
-        { source: "process2", target: "process7", value: 35, optimal: "yes" },
-        { source: "process1", target: "process3", value: 20, optimal: "yes" },
-        { source: "process5", target: "process1", value: 20, optimal: "yes" },
-        { source: "process6", target: "startA", value: 5, optimal: "yes" },
-        { source: "process4", target: "process2", value: 10, optimal: "yes" },
-        { source: "process6", target: "process8", value: 15, optimal: "yes" },
-        { source: "process3", target: "process2", value: 15, optimal: "yes" },
-        { source: "process15", target: "process13", value: 10, optimal: "yes" },
-        { source: "process13", target: "process9", value: 10, optimal: "yes" },
-        { source: "process7", target: "startB", value: 20, optimal: "yes" },
-        { source: "process8", target: "process1", value: 10, optimal: "yes" },
-        { source: "process8", target: "process16", value: 10, optimal: "yes" },
-        { source: "process16", target: "process9", value: 10, optimal: "yes" },
-        { source: "process8", target: "process11", value: 25, optimal: "yes" },
-        { source: "process11", target: "process10", value: 20, optimal: "yes" },
-        { source: "process4", target: "process12", value: 10, optimal: "yes" },
-        { source: "process12", target: "process11", value: 10, optimal: "yes" },
-        { source: "process7", target: "process15", value: 15, optimal: "yes" },
-        { source: "process15", target: "process14", value: 10, optimal: "yes" },
-        { source: "process10", target: "process13", value: 10, optimal: "yes" },
-        { source: "process10", target: "process16", value: 10, optimal: "yes" },
-        { source: "process14", target: "finishB", value: 10, optimal: "yes" },
-        { source: "process9", target: "finishA", value: 10, optimal: "yes" },
-        { source: "process16", target: "process8", value: 10, optimal: "yes" },
-        { source: "process9", target: "finishB", value: 10, optimal: "yes" },
-        { source: "process15", target: "finishB", value: 10, optimal: "yes" },
-        { source: "process15", target: "finishA", value: 10, optimal: "yes" },
-        { source: "process11", target: "process15", value: 25, optimal: "yes" },
-        { source: "process11", target: "process11", value: 5, optimal: "yes" },
-        { source: "finishA", target: "finishA", value: 15, optimal: "yes" },
-        { source: "finishB", target: "finishB", value: 15, optimal: "yes" },
-        { source: "process5", target: "process5", value: 10, optimal: "yes" },
-        { source: "finishB", target: "process14", value: 5, optimal: "yes" },
+        { source: "startA", target: "process8", value: 20, type: "primary" },
+        { source: "startA", target: "process5", value: 20, type: "primary" },
+        { source: "startA", target: "process6", value: 20, type: "primary" },
+        { source: "startB", target: "process1", value: 15, type: "secondary" },
+        { source: "startB", target: "process5", value: 15, type: "secondary" },
+        { source: "process1", target: "process4", value: 30, type: "primary" },
+        { source: "process4", target: "process1", value: 10, type: "critical" },
+        { source: "process2", target: "process7", value: 35, type: "secondary" },
+        { source: "process1", target: "process3", value: 20, type: "primary" },
+        { source: "process5", target: "process1", value: 20, type: "secondary" },
+        { source: "process6", target: "startA", value: 5, type: "critical" },
+        { source: "process4", target: "process2", value: 10, type: "secondary" },
+        { source: "process6", target: "process8", value: 15, type: "primary" },
+        { source: "process3", target: "process2", value: 15, type: "secondary" },
+        { source: "process15", target: "process13", value: 10, type: "primary" },
+        { source: "process13", target: "process9", value: 10, type: "primary" },
+        { source: "process7", target: "startB", value: 20, type: "critical" },
+        { source: "process7", target: "startB", value: 40, type: "primary" },
+        { source: "process8", target: "process1", value: 10, type: "secondary" },
+        { source: "process8", target: "process16", value: 10, type: "primary" },
+        { source: "process16", target: "process9", value: 10, type: "primary" },
+        { source: "process8", target: "process11", value: 25, type: "primary" },
+        { source: "process11", target: "process10", value: 20, type: "primary" },
+        { source: "process4", target: "process12", value: 10, type: "secondary" },
+        { source: "process12", target: "process11", value: 10, type: "secondary" },
+        { source: "process7", target: "process15", value: 15, type: "secondary" },
+        { source: "process15", target: "process14", value: 10, type: "primary" },
+        { source: "process10", target: "process13", value: 10, type: "primary" },
+        { source: "process10", target: "process16", value: 10, type: "secondary" },
+        { source: "process14", target: "finishB", value: 10, type: "primary" },
+        { source: "process9", target: "finishA", value: 10, type: "primary" },
+        { source: "process16", target: "process8", value: 10, type: "critical" },
+        { source: "process9", target: "finishB", value: 10, type: "secondary" },
+        { source: "process15", target: "finishB", value: 10, type: "secondary" },
+        { source: "process15", target: "finishA", value: 10, type: "primary" },
+        { source: "process11", target: "process15", value: 25, type: "primary" },
+        { source: "process11", target: "process11", value: 5, type: "critical" },
+        { source: "finishA", target: "finishA", value: 15, type: "critical" },
+        { source: "finishB", target: "finishB", value: 15, type: "critical" },
+        { source: "process5", target: "process5", value: 10, type: "critical" },
+        { source: "finishB", target: "process14", value: 5, type: "critical" },
       ];
 
       // You can override the default configurations
@@ -105,7 +108,14 @@
           baseRadius: 10,
           verticalMargin: 25,
           opacity: 0.5,
-          virtualLinkType: "both", // ["both", "bezier", "virtual"]*/
+          virtualLinkType: "both", // ["both", "bezier", "virtual"]
+          color: "lightgrey", // default color for links without type
+          types: {
+            primary: { name: "Primary Flow", color: "#2196F3" },
+            secondary: { name: "Secondary Flow", color: "#9E9E9E" },
+            critical: { name: "Critical Path", color: "#F44336" },
+          },
+          typeAccessor: (d) => d.type,
         },
         arrows: {
           enabled: true,
@@ -123,6 +133,30 @@
       console.log(chart);
 
       chart.draw("chart");
+
+      // Draw legend using linkTypes from graph
+      const legendContainer = document.getElementById("legend");
+      if (chart.graph.linkTypes) {
+        Object.entries(chart.graph.linkTypes).forEach(([key, value]) => {
+          const item = document.createElement("div");
+          item.style.display = "flex";
+          item.style.alignItems = "center";
+          item.style.gap = "8px";
+          
+          const colorBox = document.createElement("div");
+          colorBox.style.width = "24px";
+          colorBox.style.height = "12px";
+          colorBox.style.backgroundColor = value.color;
+          colorBox.style.borderRadius = "2px";
+          
+          const label = document.createElement("span");
+          label.textContent = value.name;
+          
+          item.appendChild(colorBox);
+          item.appendChild(label);
+          legendContainer.appendChild(item);
+        });
+      }
     </script>
   </body>
 </html>

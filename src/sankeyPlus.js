@@ -1,6 +1,6 @@
 import { find } from "./find.js";
 //import { constant } from './constant.js';
-import {group, sum, mean, min, max, select, range} from "d3";
+import {group, groups, sum, mean, min, max, select, range, scaleLinear, linkHorizontal} from "d3";
 import { findCircuits } from "./networks/elementaryCircuits.js";
 import {
   getNodeID,
@@ -310,9 +310,9 @@ function createVirtualNodes(inputGraph, useVirtualRoutes, id) {
 
       //if the link spans more than 1 column, then replace it with virtual nodes and links
       if (thisLink.target.column - thisLink.source.column < 2) {
-        thisLink.type = "normal";
+        thisLink.linkType = "normal";
       } else {
-        thisLink.type = "replaced";
+        thisLink.linkType = "replaced";
 
         let totalToCreate = thisLink.target.column - thisLink.source.column - 1;
 
@@ -344,7 +344,7 @@ function createVirtualNodes(inputGraph, useVirtualRoutes, id) {
           newLink.index = "virtualLink" + virtualLinkIndex;
           virtualLinkIndex = virtualLinkIndex + 1;
           newLink.circular = false;
-          newLink.type = "virtual";
+          newLink.linkType = "virtual";
           newLink.parentLink = thisLink.index;
 
           graph.links.push(newLink);
@@ -358,7 +358,7 @@ function createVirtualNodes(inputGraph, useVirtualRoutes, id) {
         lastLink.index = "virtualLink" + virtualLinkIndex;
         virtualLinkIndex = virtualLinkIndex + 1;
         lastLink.circular = false;
-        lastLink.type = "virtual";
+        lastLink.linkType = "virtual";
         lastLink.parentLink = thisLink.index;
 
         graph.links.push(lastLink);
@@ -368,7 +368,7 @@ function createVirtualNodes(inputGraph, useVirtualRoutes, id) {
     let nodeByID = createMap(graph.nodes, id);
 
     graph.links.forEach(function (link, i) {
-      if (link.type == "virtual") {
+      if (link.linkType == "virtual") {
         var source = link.source;
         var target = link.target;
         if (
@@ -390,7 +390,7 @@ function createVirtualNodes(inputGraph, useVirtualRoutes, id) {
 
     let l = graph.links.length;
     while (l--) {
-      if (graph.links[l].type == "replaced") {
+      if (graph.links[l].linkType == "replaced") {
         let obj = clone(graph.links[l]);
         graph.links.splice(l, 1);
         graph.replacedLinks.push(obj);
@@ -400,14 +400,14 @@ function createVirtualNodes(inputGraph, useVirtualRoutes, id) {
     graph.nodes.forEach(function (node) {
       let sIndex = node.sourceLinks.length;
       while (sIndex--) {
-        if (node.sourceLinks[sIndex].type == "replaced") {
+        if (node.sourceLinks[sIndex].linkType == "replaced") {
           node.sourceLinks.splice(sIndex, 1);
         }
       }
 
       let tIndex = node.targetLinks.length;
       while (tIndex--) {
-        if (node.targetLinks[tIndex].type == "replaced") {
+        if (node.targetLinks[tIndex].linkType == "replaced") {
           node.targetLinks.splice(tIndex, 1);
         }
       }
@@ -424,8 +424,7 @@ function computeNodeBreadths() {
   const setNodePositions = this.config.nodes.setPositions;
   const id = this.config.id;
 
-  let columns = d3
-    .groups(graph.nodes, (d) => d.column)
+  let columns = groups(graph.nodes, (d) => d.column)
     .sort((a, b) => a[0] - b[0])
     .map((d) => d[1]);
 
@@ -525,8 +524,7 @@ function resolveCollisionsAndRelax() {
   const minNodePadding = this.config.nodes.minPadding;
   const iterations = this.config.iterations;
 
-  let columns = d3
-    .groups(graph.nodes, (d) => d.column)
+  let columns = groups(graph.nodes, (d) => d.column)
     .sort((a, b) => a[0] - b[0])
     .map((d) => d[1]);
 
@@ -738,8 +736,7 @@ function fillHeight(inputGraph) {
     var chartHeight = graph.y1 - graph.y0;
     var ratio = chartHeight / currentHeight;
 
-    let moveScale = d3
-      .scaleLinear()
+    let moveScale = scaleLinear()
       .domain([minY0, maxY1])
       .range([graph.y0, graph.y1]);
 
@@ -863,8 +860,7 @@ function addVirtualPathData(inputGraph, virtualLinkType) {
 
       replacedLink.path = pathString;
     } else {
-      var normalPath = d3
-        .linkHorizontal()
+      var normalPath = linkHorizontal()
         .source(function (d) {
           var x = d.x0;
           var y = d.y0;
@@ -884,7 +880,7 @@ function addVirtualPathData(inputGraph, virtualLinkType) {
 
   let l = graph.links.length;
   while (l--) {
-    if (graph.links[l].type == "virtual") {
+    if (graph.links[l].linkType == "virtual") {
       let obj = clone(graph.links[l]);
       graph.links.splice(l, 1);
       graph.virtualLinks.push(obj);
@@ -945,6 +941,8 @@ class SankeyChart {
         verticalMargin: 25,
         virtualLinkType: "both", // ["both", "bezier", "virtual"]
         color: "lightgrey",
+        types: null, // e.g. { "optimal": { name: "Optimal", color: "green" }, "critical": { name: "Critical", color: "red" } }
+        typeAccessor: (d) => d.type, // function to get link type from data
       },
       arrows: {
         enabled: false,
@@ -1135,16 +1133,46 @@ class SankeyChart {
 
     var link = linkG.data(this.graph.links).enter().append("g");
 
+    const linkTypes = this.config.links.types;
+    const typeAccessor = this.config.links.typeAccessor;
+    const defaultLinkColor = this.config.links.color;
+
+    const getLinkColor = (d) => {
+      if (linkTypes && typeAccessor) {
+        const linkType = typeAccessor(d);
+        if (linkType && linkTypes[linkType]) {
+          return linkTypes[linkType].color || defaultLinkColor;
+        }
+      }
+      return defaultLinkColor;
+    };
+
     link
       .filter((d) => d.path)
       .append("path")
-      .attr("class", "sankey-link")
+      .attr("class", (d) => {
+        const baseClass = "sankey-link";
+        if (linkTypes && typeAccessor) {
+          const linkType = typeAccessor(d);
+          if (linkType) {
+            return `${baseClass} sankey-link-type-${linkType}`;
+          }
+        }
+        return baseClass;
+      })
       .attr("d", (d) => d.path)
       .style("stroke-width", (d) => Math.max(1, d.width))
-      .style("stroke", this.config.links.color);
+      .style("stroke", getLinkColor);
 
     link.append("title").text(function (d) {
-      return d.source.name + " → " + d.target.name + "\n Index: " + d.index;
+      let typeName = "";
+      if (linkTypes && typeAccessor) {
+        const linkType = typeAccessor(d);
+        if (linkType && linkTypes[linkType]) {
+          typeName = "\nType: " + linkTypes[linkType].name;
+        }
+      }
+      return d.source.name + " -> " + d.target.name + "\nIndex: " + d.index + typeName;
     });
 
     svg
@@ -1171,6 +1199,11 @@ class SankeyChart {
       .attr("height", this.graph.y1 - this.graph.y0)
       .style("fill", "none")
       .style("stroke", this.config.showCanvasBorder ? "green" : "none");
+
+    // Add legend data to graph for external use
+    if (linkTypes) {
+      this.graph.linkTypes = linkTypes;
+    }
 
     if (this.config.arrows.enabled) {
       let arrowLength = this.config.arrows.length;
