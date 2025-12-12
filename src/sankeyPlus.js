@@ -471,6 +471,8 @@ function computeNodeBreadths() {
     .sort((a, b) => a[0] - b[0])
     .map((d) => d[1]);
 
+  const nodePadding = this.config.nodes.padding;
+
   columns.forEach( (nodes) => {
     let nodesLength = nodes.length;
 
@@ -479,6 +481,18 @@ function computeNodeBreadths() {
     }, 0);
 
     let preferredTotalGap = graph.y1 - graph.y0 - totalColumnValue * graph.ky;
+    
+    // Cap the gap to prevent huge spaces when scale is small
+    // Maximum gap per node should be reasonable (e.g., 2x nodePadding)
+    let maxGapPerNode = nodePadding * 2;
+    let maxTotalGap = maxGapPerNode * (nodesLength - 1);
+    if (preferredTotalGap > maxTotalGap) {
+      preferredTotalGap = maxTotalGap;
+    }
+    // Also ensure gap is not negative
+    if (preferredTotalGap < 0) {
+      preferredTotalGap = 0;
+    }
 
      const optimizedSort = (a, b) => {
       if (a.circularLinkType == b.circularLinkType) {
@@ -548,13 +562,28 @@ function computeNodeBreadths() {
             node.y1 = node.y0 + node.value * graph.ky;
           }
         } else {
-          if (graph.y0 == 0 || graph.y1 == 0) {
-            node.y0 = ((graph.y1 - graph.y0) / nodesLength) * i;
-            node.y1 = node.y0 + node.value * graph.ky;
-          } else {
-            node.y0 = (graph.y1 - graph.y0) / 2 - nodesLength / 2 + i;
-            node.y1 = node.y0 + node.value * graph.ky;
+          // For non-cycle nodes, distribute them more evenly
+          // Calculate total height needed for nodes
+          let totalNodesHeight = totalColumnValue * graph.ky;
+          let availableHeight = graph.y1 - graph.y0;
+          let totalGap = availableHeight - totalNodesHeight;
+          
+          // Cap gap to prevent huge spaces
+          let maxGapPerNode = nodePadding * 2;
+          let maxTotalGap = maxGapPerNode * (nodesLength - 1);
+          if (totalGap > maxTotalGap) {
+            totalGap = maxTotalGap;
           }
+          if (totalGap < 0) {
+            totalGap = 0;
+          }
+          
+          // Distribute nodes evenly with capped gaps
+          let gapPerNode = nodesLength > 1 ? totalGap / (nodesLength - 1) : 0;
+          let startY = graph.y0 + (availableHeight - totalNodesHeight - totalGap) / 2;
+          
+          node.y0 = startY + i * (node.value * graph.ky + gapPerNode);
+          node.y1 = node.y0 + node.value * graph.ky;
         }
       }, this);
     }
@@ -659,6 +688,15 @@ function resolveCollisionsAndRelax() {
       }
 
       // Second pass: position nodes with space for self-links
+      // Calculate total height needed for nodes and self-links
+      let totalNodesHeight = nodes.reduce((sum, n) => sum + (n.y1 - n.y0), 0);
+      let totalSelfLinksHeight = nodes.reduce((sum, n) => sum + (n.selfLinksHeight ? n.selfLinksHeight.top + n.selfLinksHeight.bottom : 0), 0);
+      let availableHeight = graph.y1 - graph.y0;
+      let maxTotalPadding = availableHeight - totalNodesHeight - totalSelfLinksHeight;
+      
+      // Cap padding per node to prevent huge gaps when scale is small
+      let maxPaddingPerNode = maxTotalPadding > 0 ? Math.min(nodePadding * 2, maxTotalPadding / Math.max(1, n - 1)) : nodePadding;
+      
       for (i = 0; i < n; ++i) {
         node = nodes[i];
         
@@ -673,7 +711,9 @@ function resolveCollisionsAndRelax() {
         }
         
         // Add space for bottom self-links after the node
-        y = node.y1 + nodePadding + node.selfLinksHeight.bottom;
+        // Use capped padding to prevent huge gaps
+        let actualPadding = i < n - 1 ? Math.min(nodePadding, maxPaddingPerNode) : 0;
+        y = node.y1 + actualPadding + node.selfLinksHeight.bottom;
       }
 
       // If the bottommost node goes outside the bounds, push it back up.
