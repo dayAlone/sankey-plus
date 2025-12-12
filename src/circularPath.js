@@ -66,8 +66,8 @@ export function addCircularPathData(
         link.circularPathData.leftSmallArcRadius = selfLinkRadius;
         link.circularPathData.leftLargeArcRadius = selfLinkRadius;
 
-        // Minimal margin for self-links - just enough for the arc
-        var selfLinkMargin = selfLinkRadius + link.width / 2;
+        // Margin for self-links - enough for a nice rounded loop
+        var selfLinkMargin = selfLinkRadius * 2 + link.width;
 
         if (link.circularLinkType == "bottom") {
           link.circularPathData.verticalFullExtent =
