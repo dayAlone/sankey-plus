@@ -40,7 +40,6 @@ export const config = {
       critical: { name: "Critical Path", color: "#F44336" },
     },
     typeAccessor: (d) => d.type, // function to get link type from data
-    typeOrder: ["critical", "secondary", "primary"], // order from top to bottom: critical (orange) at top, primary (blue) at bottom
   },
   arrows: {
     enabled: true,

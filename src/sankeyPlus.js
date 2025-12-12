@@ -519,6 +519,10 @@ function computeNodeBreadths() {
       });
     } else {
       nodes.forEach(function (node, i) {
+        const cycleInset =
+          typeof this.config.nodes.cycleInsetAccessor === "function"
+            ? Number(this.config.nodes.cycleInsetAccessor(node)) || 0
+            : Number(this.config.nodes.cycleInset) || 0;
         // if the node is in the last column, and is the only node in that column, put it in the centre
         if (node.depth == columns.length - 1 && nodesLength == 1) {
           node.y0 = graph.y1 / 2 - node.value * graph.ky;
@@ -537,10 +541,10 @@ function computeNodeBreadths() {
             node.y0 = graph.y1 / 2 + i;
             node.y1 = node.y0 + node.value * graph.ky;
           } else if (node.circularLinkType == "top") {
-            node.y0 = graph.y0 + i;
+            node.y0 = graph.y0 + i + cycleInset;
             node.y1 = node.y0 + node.value * graph.ky;
           } else {
-            node.y0 = graph.y1 - node.value * graph.ky - i;
+            node.y0 = graph.y1 - node.value * graph.ky - i - cycleInset;
             node.y1 = node.y0 + node.value * graph.ky;
           }
         } else {
@@ -552,7 +556,7 @@ function computeNodeBreadths() {
             node.y1 = node.y0 + node.value * graph.ky;
           }
         }
-      });
+      }, this);
     }
   });
 
@@ -985,6 +989,11 @@ class SankeyChart {
         virtualPadding: 7,
         horizontalSort: null,
         verticalSort: null,
+        // Pull cycle nodes slightly away from the extreme top/bottom (in px).
+        // Useful when circular routing reserves a lot of space and some cycle nodes end up too far from center.
+        cycleInset: 0,
+        // Optional per-node override: (node) => number (px). If provided, overrides cycleInset for that node.
+        cycleInsetAccessor: null,
         setPositions: false,
         fill: "grey",
         stroke: "none",
@@ -1003,7 +1012,6 @@ class SankeyChart {
         types: null, // e.g. { "optimal": { name: "Optimal", color: "green" }, "critical": { name: "Critical", color: "red" } }
         typeAccessor: (d) => d.type, // function to get link type from data
         typeOrder: null, // e.g. ["critical", "primary", "secondary"] - order from top to bottom
-        sortIterations: 6, // repeated source/target sorting passes to reduce crossings
       },
       arrows: {
         enabled: false,
@@ -1122,25 +1130,8 @@ class SankeyChart {
       this.config.links.verticalMargin
     );
 
-    // Iteratively sort source/target link orders to converge and reduce crossings.
-    const sortIters =
-      typeof this.config.links.sortIterations === "number"
-        ? Math.max(1, Math.floor(this.config.links.sortIterations))
-        : 1;
-    for (let i = 0; i < sortIters; i++) {
-      this.graph = sortSourceLinks(
-        this.graph,
-        this.config.id,
-        this.config.links.typeOrder,
-        this.config.links.typeAccessor
-      );
-      this.graph = sortTargetLinks(
-        this.graph,
-        this.config.id,
-        this.config.links.typeOrder,
-        this.config.links.typeAccessor
-      );
-    }
+    this.graph = sortSourceLinks(this.graph, this.config.id, this.config.links.typeOrder, this.config.links.typeAccessor);
+    this.graph = sortTargetLinks(this.graph, this.config.id, this.config.links.typeOrder, this.config.links.typeAccessor);
     this.graph = fillHeight(this.graph);
 
     this.graph = addCircularPathData(
