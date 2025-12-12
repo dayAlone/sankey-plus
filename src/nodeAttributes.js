@@ -52,16 +52,19 @@ export function numberOfNonSelfLinkingCycles(node, id) {
 }
 
 // Calculate total height needed for self-links of a node
+// This should match the selfLinkMargin calculation in circularPath.js
 export function getSelfLinksHeight(node, id, baseRadius) {
-    var totalHeight = 0;
+    var maxHeight = 0;
     node.sourceLinks.forEach(function (l) {
         if (l.circular && selfLinking(l, id)) {
-            totalHeight += l.width + 2; // link width plus small gap
+            // Match the formula: selfLinkRadius * 2 + link.width
+            // where selfLinkRadius = baseRadius + link.width / 2
+            var selfLinkRadius = (baseRadius || 10) + l.width / 2;
+            var linkHeight = selfLinkRadius * 2 + l.width;
+            if (linkHeight > maxHeight) {
+                maxHeight = linkHeight;
+            }
         }
     });
-    // Add arc radius if there are self-links
-    if (totalHeight > 0) {
-        totalHeight += (baseRadius || 10) * 2;
-    }
-    return totalHeight;
+    return maxHeight;
 }
