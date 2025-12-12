@@ -188,47 +188,59 @@ function selectCircularLinkTypes(inputGraph, id) {
     }
   });
 
-  //correct circular link types based on vertical positions
+  // First pass: determine types for non-self circular links based on vertical positions
   graph.links.forEach(function (link) {
-    if (link.circular) {
-      //if link is selflinking, then link should have opposite type from node's other circular links
-      if (selfLinking(link, id)) {
-        // Check if node has other circular links (not self-links)
-        var hasOtherCircularLinks = link.source.sourceLinks.some(function(l) {
-          return l.circular && !selfLinking(l, id);
-        }) || link.source.targetLinks.some(function(l) {
-          return l.circular && !selfLinking(l, id);
-        });
-        
-        if (hasOtherCircularLinks) {
-          // Put self-link on opposite side from other circular links
-          link.circularLinkType = link.source.circularLinkType === "top" ? "bottom" : "top";
+    if (link.circular && !selfLinking(link, id)) {
+      var sourceCenter = (link.source.y0 + link.source.y1) / 2;
+      var targetCenter = (link.target.y0 + link.target.y1) / 2;
+      
+      // Check if this is a forward circular link (goes left to right but is part of cycle)
+      var isForwardCircular = link.target.column > link.source.column;
+      
+      if (isForwardCircular) {
+        // Forward circular links: route above the main flow to avoid crossing
+        if (targetCenter >= sourceCenter) {
+          link.circularLinkType = "top";
+        } else {
+          link.circularLinkType = "bottom";
         }
       } else {
-        // For non-self-links: determine type based on vertical position and direction
-        var sourceCenter = (link.source.y0 + link.source.y1) / 2;
-        var targetCenter = (link.target.y0 + link.target.y1) / 2;
-        
-        // Check if this is a forward circular link (goes left to right but is part of cycle)
-        var isForwardCircular = link.target.column > link.source.column;
-        
-        if (isForwardCircular) {
-          // Forward circular links: route above the main flow to avoid crossing
-          // Most forward circular links should go top to stay out of the way
-          if (targetCenter >= sourceCenter) {
-            link.circularLinkType = "top";
-          } else {
-            link.circularLinkType = "bottom";
-          }
-        } else {
-          // Backward circular links: route towards target
-          if (targetCenter < sourceCenter) {
-            link.circularLinkType = "top";
-          } else if (targetCenter > sourceCenter) {
-            link.circularLinkType = "bottom";
-          }
+        // Backward circular links: route towards target
+        if (targetCenter < sourceCenter) {
+          link.circularLinkType = "top";
+        } else if (targetCenter > sourceCenter) {
+          link.circularLinkType = "bottom";
         }
       }
+    }
+  });
+  
+  // Second pass: determine types for self-links based on other circular links of the same node
+  graph.links.forEach(function (link) {
+    if (link.circular && selfLinking(link, id)) {
+      // Find the predominant type of other circular links for this node
+      var topCount = 0;
+      var bottomCount = 0;
+      
+      link.source.sourceLinks.forEach(function(l) {
+        if (l.circular && !selfLinking(l, id)) {
+          if (l.circularLinkType === "top") topCount++;
+          else if (l.circularLinkType === "bottom") bottomCount++;
+        }
+      });
+      link.source.targetLinks.forEach(function(l) {
+        if (l.circular && !selfLinking(l, id)) {
+          if (l.circularLinkType === "top") topCount++;
+          else if (l.circularLinkType === "bottom") bottomCount++;
+        }
+      });
+      
+      if (topCount > 0 || bottomCount > 0) {
+        // Put self-link on opposite side from majority of other circular links
+        var otherType = topCount >= bottomCount ? "top" : "bottom";
+        link.circularLinkType = otherType === "top" ? "bottom" : "top";
+      }
+      // else keep the type assigned earlier (for nodes with only self-links)
     }
   });
 
