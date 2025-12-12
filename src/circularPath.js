@@ -423,31 +423,40 @@ function createCircularPathString(link) {
   return pathString;
 }
 
-// create a compact self-link path (loop to the right of the node, between nodes vertically)
+// create a compact self-link path (full loop to the right of the node, going up first)
 function createSelfLinkPathString(link) {
   var sourceX = link.circularPathData.sourceX; // right edge of node
   var sourceY = link.circularPathData.sourceY;
   var targetY = link.circularPathData.targetY;
   
-  // The loop should go to the right of the node
-  // Calculate how far right the loop should extend
+  // Calculate loop dimensions
   var verticalDistance = Math.abs(targetY - sourceY);
-  var horizontalExtent = Math.max(verticalDistance * 0.6, link.width + 15);
+  var loopRadius = Math.max(verticalDistance / 2, link.width + 10);
   
-  // Control points for smooth bezier curve
-  var rightX = sourceX + horizontalExtent;
-  var midY = (sourceY + targetY) / 2;
+  // The loop goes: right -> up -> around -> down -> back
+  // Using two arcs to create a full loop shape
   
-  // Path: smooth loop to the right
-  // Using cubic bezier curves for a nice rounded shape
+  var buffer = 5; // small buffer from node edge
+  var startX = sourceX + buffer;
+  
+  // Mid point (top of the loop)
+  var topY = Math.min(sourceY, targetY) - loopRadius;
+  var rightX = startX + loopRadius;
+  
+  // Path: full loop going up and around
   var pathString = 
     // start at source
     "M" + sourceX + " " + sourceY + " " +
-    // curve out to the right and down to middle
-    "C" + rightX + " " + sourceY + " " +
-    rightX + " " + targetY + " " +
-    // end at target
-    sourceX + " " + targetY;
+    // line to buffer
+    "L" + startX + " " + sourceY + " " +
+    // arc up to the top
+    "A" + loopRadius + " " + loopRadius + " 0 0 0 " + 
+    rightX + " " + (sourceY - loopRadius) + " " +
+    // arc continuing around to target side
+    "A" + loopRadius + " " + loopRadius + " 0 0 0 " +
+    startX + " " + targetY + " " +
+    // line back to node
+    "L" + sourceX + " " + targetY;
   
   return pathString;
 }
