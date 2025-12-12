@@ -423,38 +423,31 @@ function createCircularPathString(link) {
   return pathString;
 }
 
-// create a compact self-link path (U-shaped loop below the node)
+// create a compact self-link path (loop to the right of the node, between nodes vertically)
 function createSelfLinkPathString(link) {
-  var sourceX = link.circularPathData.sourceX;
-  var targetX = link.circularPathData.targetX;
+  var sourceX = link.circularPathData.sourceX; // right edge of node
   var sourceY = link.circularPathData.sourceY;
   var targetY = link.circularPathData.targetY;
   
-  // Get the bottom of the source node plus some offset
-  var nodeBottom = link.source.y1;
-  var arcRadius = link.circularPathData.arcRadius || (link.width / 2 + 10);
+  // The loop should go to the right of the node
+  // Calculate how far right the loop should extend
+  var verticalDistance = Math.abs(targetY - sourceY);
+  var horizontalExtent = Math.max(verticalDistance * 0.6, link.width + 15);
   
-  // The loop extends below the node into the reserved space
-  // Use the selfLinksHeight that was calculated during node positioning
-  var selfLinksHeight = link.source.selfLinksHeight || (arcRadius * 2 + link.width);
-  var loopBottom = nodeBottom + selfLinksHeight / 2;
+  // Control points for smooth bezier curve
+  var rightX = sourceX + horizontalExtent;
+  var midY = (sourceY + targetY) / 2;
   
-  // Horizontal distance for the loop
-  var halfWidth = Math.max((sourceX - targetX) / 2, arcRadius);
-  var centerX = (sourceX + targetX) / 2;
-  
-  // Path: from sourceY, curve down to loopBottom, then curve back up to targetY
+  // Path: smooth loop to the right
+  // Using cubic bezier curves for a nice rounded shape
   var pathString = 
-    // start at source (right side of node)
+    // start at source
     "M" + sourceX + " " + sourceY + " " +
-    // curve down-right
-    "C" + sourceX + " " + (sourceY + arcRadius) + " " +
-    (sourceX + arcRadius) + " " + loopBottom + " " +
-    centerX + " " + loopBottom + " " +
-    // curve up-left  
-    "C" + (targetX - arcRadius) + " " + loopBottom + " " +
-    targetX + " " + (targetY + arcRadius) + " " +
-    targetX + " " + targetY;
+    // curve out to the right and down to middle
+    "C" + rightX + " " + sourceY + " " +
+    rightX + " " + targetY + " " +
+    // end at target
+    sourceX + " " + targetY;
   
   return pathString;
 }
