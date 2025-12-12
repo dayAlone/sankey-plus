@@ -86,10 +86,38 @@ export function ascendingBreadth(a, b) {
     return (link2.width || 0) - (link1.width || 0);
   }
 
+  function buildReplacedLinkIndex(graph) {
+    const m = new Map();
+    if (graph && Array.isArray(graph.replacedLinks)) {
+      for (const l of graph.replacedLinks) {
+        // replacedLink.index is the original link index; virtual links store parentLink = replacedLink.index
+        m.set(l.index, l);
+      }
+    }
+    return m;
+  }
+
+  function effectiveTargetNode(link, replacedByIndex) {
+    if (link && link.linkType === "virtual" && link.parentLink != null) {
+      const parent = replacedByIndex.get(link.parentLink);
+      if (parent && parent.target) return parent.target;
+    }
+    return link.target;
+  }
+
+  function effectiveSourceNode(link, replacedByIndex) {
+    if (link && link.linkType === "virtual" && link.parentLink != null) {
+      const parent = replacedByIndex.get(link.parentLink);
+      if (parent && parent.source) return parent.source;
+    }
+    return link.source;
+  }
+
   // sort and set the links' y0 for each node
 export function sortSourceLinks(inputGraph, id, typeOrder = null, typeAccessor = null) {
 
   let graph = inputGraph;
+  const replacedByIndex = buildReplacedLinkIndex(graph);
 
   graph.nodes.forEach(function(node) {
     // move any nodes up which are off the bottom
@@ -102,10 +130,27 @@ export function sortSourceLinks(inputGraph, id, typeOrder = null, typeAccessor =
 
     if (nodeSourceLinksLength > 1) {
       nodesSourceLinks.sort(function(link1, link2) {
+        // If we're on a real node and virtual routes are enabled, prefer sorting virtual links
+        // by their *ultimate* target node (parentLink.target), to avoid crossings at the real node.
+        const tNode1 = (!node.virtual && link1.linkType === "virtual")
+          ? effectiveTargetNode(link1, replacedByIndex)
+          : link1.target;
+        const tNode2 = (!node.virtual && link2.linkType === "virtual")
+          ? effectiveTargetNode(link2, replacedByIndex)
+          : link2.target;
+
         // If both are not circular...
         if (!link1.circular && !link2.circular) {
+          // For virtual links from real nodes: barycentric ordering by ultimate target center
+          if (!node.virtual && (link1.linkType === "virtual" || link2.linkType === "virtual")) {
+            const c1 = (tNode1.y0 + tNode1.y1) / 2;
+            const c2 = (tNode2.y0 + tNode2.y1) / 2;
+            const d = c1 - c2;
+            if (d !== 0) return d;
+          }
+
           // If the target nodes are the same column, then sort by the link's target y
-          if (link1.target.column == link2.target.column) {
+          if (tNode1.column == tNode2.column) {
             const d = link1.y1 - link2.y1;
             if (d !== 0) return d;
           } else if (!sameInclines(link1, link2)) {
@@ -153,20 +198,20 @@ export function sortSourceLinks(inputGraph, id, typeOrder = null, typeAccessor =
 
           if (link1.circularLinkType == "top") {
             // both top
-            if (link1.target.column === link2.target.column) {
-              const d = link1.target.y1 - link2.target.y1;
+            if (tNode1.column === tNode2.column) {
+              const d = tNode1.y1 - tNode2.y1;
               if (d !== 0) return d;
             } else {
-              const d = link2.target.column - link1.target.column;
+              const d = tNode2.column - tNode1.column;
               if (d !== 0) return d;
             }
           } else {
             // both bottom
-            if (link1.target.column === link2.target.column) {
-              const d = link2.target.y1 - link1.target.y1;
+            if (tNode1.column === tNode2.column) {
+              const d = tNode2.y1 - tNode1.y1;
               if (d !== 0) return d;
             } else {
-              const d = link1.target.column - link2.target.column;
+              const d = tNode1.column - tNode2.column;
               if (d !== 0) return d;
             }
           }
@@ -205,6 +250,7 @@ export function sortSourceLinks(inputGraph, id, typeOrder = null, typeAccessor =
 // sort and set the links' y1 for each node
 export function sortTargetLinks(inputGraph, id, typeOrder = null, typeAccessor = null) {
   let graph = inputGraph;
+  const replacedByIndex = buildReplacedLinkIndex(graph);
 
   graph.nodes.forEach(function(node) {
     var nodesTargetLinks = node.targetLinks;
@@ -212,8 +258,25 @@ export function sortTargetLinks(inputGraph, id, typeOrder = null, typeAccessor =
 
     if (nodesTargetLinksLength > 1) {
       nodesTargetLinks.sort(function(link1, link2) {
+        // For incoming links on a real node with virtual routes: sort virtual links
+        // by their *ultimate* source node (parentLink.source), to avoid crossings at the real node.
+        const sNode1 = (!node.virtual && link1.linkType === "virtual")
+          ? effectiveSourceNode(link1, replacedByIndex)
+          : link1.source;
+        const sNode2 = (!node.virtual && link2.linkType === "virtual")
+          ? effectiveSourceNode(link2, replacedByIndex)
+          : link2.source;
+
         // If both are not circular, base on the source y position
         if (!link1.circular && !link2.circular) {
+          // For virtual links into real nodes: barycentric ordering by ultimate source center
+          if (!node.virtual && (link1.linkType === "virtual" || link2.linkType === "virtual")) {
+            const c1 = (sNode1.y0 + sNode1.y1) / 2;
+            const c2 = (sNode2.y0 + sNode2.y1) / 2;
+            const d = c1 - c2;
+            if (d !== 0) return d;
+          }
+
           if (link1.source.column == link2.source.column) {
             const d = link1.y0 - link2.y0;
             if (d !== 0) return d;
@@ -261,20 +324,20 @@ export function sortTargetLinks(inputGraph, id, typeOrder = null, typeAccessor =
 
           if (link1.circularLinkType == "top") {
             // both top
-            if (link1.source.column === link2.source.column) {
-              const d = link1.source.y1 - link2.source.y1;
+            if (sNode1.column === sNode2.column) {
+              const d = sNode1.y1 - sNode2.y1;
               if (d !== 0) return d;
             } else {
-              const d = link1.source.column - link2.source.column;
+              const d = sNode1.column - sNode2.column;
               if (d !== 0) return d;
             }
           } else {
             // both bottom
-            if (link1.source.column === link2.source.column) {
-              const d = link1.source.y1 - link2.source.y1;
+            if (sNode1.column === sNode2.column) {
+              const d = sNode1.y1 - sNode2.y1;
               if (d !== 0) return d;
             } else {
-              const d = link2.source.column - link1.source.column;
+              const d = sNode2.column - sNode1.column;
               if (d !== 0) return d;
             }
           }
