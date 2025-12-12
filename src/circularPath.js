@@ -423,57 +423,34 @@ function createCircularPathString(link) {
   return pathString;
 }
 
-// create a compact self-link path (small loop to the right of the node)
+// create a compact self-link path (smooth loop to the right of the node)
 function createSelfLinkPathString(link) {
   var sourceX = link.circularPathData.sourceX;
   var sourceY = link.circularPathData.sourceY;
   var targetY = link.circularPathData.targetY;
   
-  // Calculate the loop size based on link width and the distance between source and target Y
+  // Calculate the vertical radius (half the distance between source and target)
   var verticalDistance = Math.abs(targetY - sourceY);
-  var loopWidth = Math.max(link.width * 2, verticalDistance / 2, 20) + link.circularPathData.rightNodeBuffer;
-  var arcRadius = link.width / 2 + 5;
+  var verticalRadius = verticalDistance / 2;
   
-  // The loop extends to the right of the node
-  var rightExtent = sourceX + loopWidth;
+  // Horizontal radius - how far the loop extends to the right
+  // Make it proportional to vertical distance but with a minimum
+  var horizontalRadius = Math.max(verticalRadius * 0.8, link.width + 10);
   
-  var pathString = "";
+  // Center Y of the ellipse
+  var centerY = (sourceY + targetY) / 2;
   
-  if (link.circularLinkType == "top" || sourceY <= targetY) {
-    // Loop goes up and around (counterclockwise)
-    pathString =
-      // start at source
-      "M" + sourceX + " " + sourceY + " " +
-      // line right to start of arc
-      "L" + (sourceX + link.circularPathData.rightNodeBuffer) + " " + sourceY + " " +
-      // arc to go up
-      "A" + arcRadius + " " + arcRadius + " 0 0 0 " +
-      (sourceX + link.circularPathData.rightNodeBuffer + arcRadius) + " " + (sourceY - arcRadius) + " " +
-      // line up
-      "L" + (sourceX + link.circularPathData.rightNodeBuffer + arcRadius) + " " + (targetY + arcRadius) + " " +
-      // arc to go left
-      "A" + arcRadius + " " + arcRadius + " 0 0 0 " +
-      (sourceX + link.circularPathData.rightNodeBuffer) + " " + targetY + " " +
-      // line to target
-      "L" + sourceX + " " + targetY;
-  } else {
-    // Loop goes down and around (clockwise)
-    pathString =
-      // start at source
-      "M" + sourceX + " " + sourceY + " " +
-      // line right to start of arc
-      "L" + (sourceX + link.circularPathData.rightNodeBuffer) + " " + sourceY + " " +
-      // arc to go down
-      "A" + arcRadius + " " + arcRadius + " 0 0 1 " +
-      (sourceX + link.circularPathData.rightNodeBuffer + arcRadius) + " " + (sourceY + arcRadius) + " " +
-      // line down
-      "L" + (sourceX + link.circularPathData.rightNodeBuffer + arcRadius) + " " + (targetY - arcRadius) + " " +
-      // arc to go left
-      "A" + arcRadius + " " + arcRadius + " 0 0 1 " +
-      (sourceX + link.circularPathData.rightNodeBuffer) + " " + targetY + " " +
-      // line to target
-      "L" + sourceX + " " + targetY;
-  }
+  // Use a single elliptical arc for a smooth loop
+  // large-arc-flag = 1 means use the larger arc (more than 180 degrees)
+  // sweep-flag determines direction: 0 = counter-clockwise, 1 = clockwise
+  
+  var pathString = 
+    // start at source
+    "M" + sourceX + " " + sourceY + " " +
+    // single elliptical arc to target
+    // A rx ry x-axis-rotation large-arc-flag sweep-flag x y
+    "A" + horizontalRadius + " " + verticalRadius + " 0 1 1 " +
+    sourceX + " " + targetY;
   
   return pathString;
 }
