@@ -119,20 +119,25 @@ export function sortSourceLinks(inputGraph, id, typeOrder = null, typeAccessor =
           }
         }
 
-        // SECOND: For non-circular links, sort by target node center position to minimize crossings
-        // Use type as secondary criterion when target positions are similar
+        // SECOND: For non-circular links, sort by target position to minimize crossings
         if (!link1.circular && !link2.circular) {
-          // Use target node center for more reliable comparison
+          // Primary: sort by target node's vertical center
           var target1Center = (link1.target.y0 + link1.target.y1) / 2;
           var target2Center = (link2.target.y0 + link2.target.y1) / 2;
+          var centerDiff = target1Center - target2Center;
           
-          // If targets are at different vertical positions, sort by position
-          var yDiff = target1Center - target2Center;
-          if (Math.abs(yDiff) > 1) { // small threshold for floating point
-            return yDiff;
+          // If targets are at significantly different positions, sort by target center
+          if (Math.abs(centerDiff) > 10) {
+            return centerDiff;
           }
           
-          // If target centers are similar, use type as tiebreaker
+          // Secondary: if targets are similar, sort by actual link entry point (y1)
+          var y1Diff = link1.y1 - link2.y1;
+          if (Math.abs(y1Diff) > 1) {
+            return y1Diff;
+          }
+          
+          // Tertiary: use type as tiebreaker
           if (typeOrder && typeAccessor) {
             var type1 = typeAccessor(link1);
             var type2 = typeAccessor(link2);
@@ -145,7 +150,7 @@ export function sortSourceLinks(inputGraph, id, typeOrder = null, typeAccessor =
             }
           }
           
-          return yDiff;
+          return centerDiff || y1Diff;
         }
       });
     }
@@ -222,20 +227,25 @@ export function sortTargetLinks(inputGraph, id, typeOrder = null, typeAccessor =
           }
         }
 
-        // SECOND: For non-circular links, sort by source node center position to minimize crossings
-        // Use type as secondary criterion when source positions are similar
+        // SECOND: For non-circular links, sort by source position to minimize crossings
         if (!link1.circular && !link2.circular) {
-          // Use source node center for more reliable comparison
+          // Primary: sort by source node's vertical center
           var source1Center = (link1.source.y0 + link1.source.y1) / 2;
           var source2Center = (link2.source.y0 + link2.source.y1) / 2;
+          var centerDiff = source1Center - source2Center;
           
-          // If sources are at different vertical positions, sort by position
-          var yDiff = source1Center - source2Center;
-          if (Math.abs(yDiff) > 1) { // small threshold for floating point
-            return yDiff;
+          // If sources are at significantly different positions, sort by source center
+          if (Math.abs(centerDiff) > 10) {
+            return centerDiff;
           }
           
-          // If source centers are similar, use type as tiebreaker
+          // Secondary: if sources are similar, sort by actual link exit point (y0)
+          var y0Diff = link1.y0 - link2.y0;
+          if (Math.abs(y0Diff) > 1) {
+            return y0Diff;
+          }
+          
+          // Tertiary: use type as tiebreaker
           if (typeOrder && typeAccessor) {
             var type1 = typeAccessor(link1);
             var type2 = typeAccessor(link2);
@@ -248,7 +258,7 @@ export function sortTargetLinks(inputGraph, id, typeOrder = null, typeAccessor =
             }
           }
           
-          return yDiff;
+          return centerDiff || y0Diff;
         }
       });
     }
