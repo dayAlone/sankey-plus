@@ -121,40 +121,54 @@ export function sortSourceLinks(inputGraph, id, typeOrder = null, typeAccessor =
           }
         }
 
-        // SECOND: For non-circular links, sort by type if typeOrder is provided
-        if (typeOrder && typeAccessor) {
-          var type1 = typeAccessor(link1);
-          var type2 = typeAccessor(link2);
-          var typeIndex1 = typeOrder.indexOf(type1);
-          var typeIndex2 = typeOrder.indexOf(type2);
-          // If type not in order array, put at end
-          if (typeIndex1 === -1) typeIndex1 = typeOrder.length;
-          if (typeIndex2 === -1) typeIndex2 = typeOrder.length;
-          if (typeIndex1 !== typeIndex2) {
-            return typeIndex1 - typeIndex2;
-          }
-        }
-
-        // THIRD: if both are not circular...
+        // SECOND: For non-circular links, sort by target position to minimize crossings
+        // Use type as secondary criterion when target positions are similar
         if (!link1.circular && !link2.circular) {
-          // if the target nodes are the same column, then sort by the link's target y
+          // Calculate effective target Y for comparison
+          var target1Y, target2Y;
+          
           if (link1.target.column == link2.target.column) {
-            return link1.y1 - link2.y1;
+            target1Y = link1.y1;
+            target2Y = link2.y1;
           } else if (!sameInclines(link1, link2)) {
-            // if the links slope in different directions, then sort by the link's target y
-            return link1.y1 - link2.y1;
-
-            // if the links slope in same directions, then sort by any overlap
+            target1Y = link1.y1;
+            target2Y = link2.y1;
           } else {
+            // Adjust for different column distances
             if (link1.target.column > link2.target.column) {
               var link2Adj = linkPerpendicularYToLinkTarget(link2, link1);
-              return link1.y1 - link2Adj;
-            }
-            if (link2.target.column > link1.target.column) {
+              target1Y = link1.y1;
+              target2Y = link2Adj;
+            } else if (link2.target.column > link1.target.column) {
               var link1Adj = linkPerpendicularYToLinkTarget(link1, link2);
-              return link1Adj - link2.y1;
+              target1Y = link1Adj;
+              target2Y = link2.y1;
+            } else {
+              target1Y = link1.y1;
+              target2Y = link2.y1;
             }
           }
+          
+          // If targets are at significantly different positions, sort by position
+          var yDiff = target1Y - target2Y;
+          if (Math.abs(yDiff) > 5) { // threshold to avoid floating point issues
+            return yDiff;
+          }
+          
+          // If positions are similar, use type as tiebreaker
+          if (typeOrder && typeAccessor) {
+            var type1 = typeAccessor(link1);
+            var type2 = typeAccessor(link2);
+            var typeIndex1 = typeOrder.indexOf(type1);
+            var typeIndex2 = typeOrder.indexOf(type2);
+            if (typeIndex1 === -1) typeIndex1 = typeOrder.length;
+            if (typeIndex2 === -1) typeIndex2 = typeOrder.length;
+            if (typeIndex1 !== typeIndex2) {
+              return typeIndex1 - typeIndex2;
+            }
+          }
+          
+          return yDiff;
         }
       });
     }
@@ -233,39 +247,54 @@ export function sortTargetLinks(inputGraph, id, typeOrder = null, typeAccessor =
           }
         }
 
-        // SECOND: For non-circular links, sort by type if typeOrder is provided
-        if (typeOrder && typeAccessor) {
-          var type1 = typeAccessor(link1);
-          var type2 = typeAccessor(link2);
-          var typeIndex1 = typeOrder.indexOf(type1);
-          var typeIndex2 = typeOrder.indexOf(type2);
-          // If type not in order array, put at end
-          if (typeIndex1 === -1) typeIndex1 = typeOrder.length;
-          if (typeIndex2 === -1) typeIndex2 = typeOrder.length;
-          if (typeIndex1 !== typeIndex2) {
-            return typeIndex1 - typeIndex2;
-          }
-        }
-
-        // THIRD: if both are not circular, the base on the source y position
+        // SECOND: For non-circular links, sort by source position to minimize crossings
+        // Use type as secondary criterion when source positions are similar
         if (!link1.circular && !link2.circular) {
+          // Calculate effective source Y for comparison
+          var source1Y, source2Y;
+          
           if (link1.source.column == link2.source.column) {
-            return link1.y0 - link2.y0;
+            source1Y = link1.y0;
+            source2Y = link2.y0;
           } else if (!sameInclines(link1, link2)) {
-            return link1.y0 - link2.y0;
+            source1Y = link1.y0;
+            source2Y = link2.y0;
           } else {
             // get the angle of the link to the further source node (ie the smaller column)
             if (link2.source.column < link1.source.column) {
               var link2Adj = linkPerpendicularYToLinkSource(link2, link1);
-
-              return link1.y0 - link2Adj;
-            }
-            if (link1.source.column < link2.source.column) {
+              source1Y = link1.y0;
+              source2Y = link2Adj;
+            } else if (link1.source.column < link2.source.column) {
               var link1Adj = linkPerpendicularYToLinkSource(link1, link2);
-
-              return link1Adj - link2.y0;
+              source1Y = link1Adj;
+              source2Y = link2.y0;
+            } else {
+              source1Y = link1.y0;
+              source2Y = link2.y0;
             }
           }
+          
+          // If sources are at significantly different positions, sort by position
+          var yDiff = source1Y - source2Y;
+          if (Math.abs(yDiff) > 5) { // threshold to avoid floating point issues
+            return yDiff;
+          }
+          
+          // If positions are similar, use type as tiebreaker
+          if (typeOrder && typeAccessor) {
+            var type1 = typeAccessor(link1);
+            var type2 = typeAccessor(link2);
+            var typeIndex1 = typeOrder.indexOf(type1);
+            var typeIndex2 = typeOrder.indexOf(type2);
+            if (typeIndex1 === -1) typeIndex1 = typeOrder.length;
+            if (typeIndex2 === -1) typeIndex2 = typeOrder.length;
+            if (typeIndex1 !== typeIndex2) {
+              return typeIndex1 - typeIndex2;
+            }
+          }
+          
+          return yDiff;
         }
       });
     }
