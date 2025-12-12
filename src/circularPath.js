@@ -139,10 +139,22 @@ export function addCircularPathData(
           radiusOffset = radiusOffset + l.width;
         });
 
+        // Find min/max Y of nodes between source and target columns (inclusive)
+        var relevantMinY = Math.min(link.source.y0, link.target.y0);
+        var relevantMaxY = Math.max(link.source.y1, link.target.y1);
+        
+        graph.nodes.forEach(function(node) {
+          if (node.column >= Math.min(link.source.column, link.target.column) && 
+              node.column <= Math.max(link.source.column, link.target.column)) {
+            if (node.y0 < relevantMinY) relevantMinY = node.y0;
+            if (node.y1 > relevantMaxY) relevantMaxY = node.y1;
+          }
+        });
+
         // bottom links
         if (link.circularLinkType == "bottom") {
           link.circularPathData.verticalFullExtent =
-            Math.max(graph.y1, link.source.y1, link.target.y1) +
+            relevantMaxY +
             verticalMargin +
             link.circularPathData.verticalBuffer;
           link.circularPathData.verticalRightInnerExtent =
@@ -154,7 +166,7 @@ export function addCircularPathData(
         } else {
           // top links
           link.circularPathData.verticalFullExtent =
-            minY - verticalMargin - link.circularPathData.verticalBuffer;
+            relevantMinY - verticalMargin - link.circularPathData.verticalBuffer;
           link.circularPathData.verticalRightInnerExtent =
             link.circularPathData.verticalFullExtent +
             link.circularPathData.rightLargeArcRadius;
