@@ -58,8 +58,8 @@ export function addCircularPathData(
       link.circularPathData.sourceY = link.y0;
       link.circularPathData.targetY = link.y1;
 
-      // for self linking paths, and that the only circular link in/out of that node
-      if (selfLinking(link, id) && onlyCircularLink(link)) {
+      // for self linking paths - always use compact layout close to the node
+      if (selfLinking(link, id)) {
         link.circularPathData.rightSmallArcRadius = baseRadius + link.width / 2;
         link.circularPathData.rightLargeArcRadius = baseRadius + link.width / 2;
         link.circularPathData.leftSmallArcRadius = baseRadius + link.width / 2;
@@ -89,7 +89,7 @@ export function addCircularPathData(
             link.circularPathData.verticalFullExtent +
             link.circularPathData.leftLargeArcRadius;
         }
-      } else {
+      } else if (!selfLinking(link, id)) {
         // else calculate normally
         // add right extent coordinates, based on links with same source column and circularLink type
         var thisColumn = link.source.column;
