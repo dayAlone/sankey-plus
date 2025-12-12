@@ -423,40 +423,46 @@ function createCircularPathString(link) {
   return pathString;
 }
 
-// create a compact self-link path (full loop to the right of the node, going up first)
+// create a self-link path (semicircle from right edge to left edge of node)
 function createSelfLinkPathString(link) {
-  var sourceX = link.circularPathData.sourceX; // right edge of node
-  var sourceY = link.circularPathData.sourceY;
-  var targetY = link.circularPathData.targetY;
+  // Right edge of node (source)
+  var sourceX = link.source.x1;
+  // Left edge of node (target)  
+  var targetX = link.source.x0;
   
-  // Calculate loop dimensions
-  var verticalDistance = Math.abs(targetY - sourceY);
-  var loopRadius = Math.max(verticalDistance / 2, link.width + 10);
+  // Node width
+  var nodeWidth = sourceX - targetX;
   
-  // The loop goes: right -> up -> around -> down -> back
-  // Using two arcs to create a full loop shape
+  // Radius for the semicircle - half the node width plus some padding for the link
+  var radius = nodeWidth / 2 + link.width / 2 + 5;
   
-  var buffer = 5; // small buffer from node edge
-  var startX = sourceX + buffer;
+  // Center X of the node
+  var centerX = (sourceX + targetX) / 2;
   
-  // Mid point (top of the loop)
-  var topY = Math.min(sourceY, targetY) - loopRadius;
-  var rightX = startX + loopRadius;
+  var pathString;
   
-  // Path: full loop going up and around
-  var pathString = 
-    // start at source
-    "M" + sourceX + " " + sourceY + " " +
-    // line to buffer
-    "L" + startX + " " + sourceY + " " +
-    // arc up to the top
-    "A" + loopRadius + " " + loopRadius + " 0 0 0 " + 
-    rightX + " " + (sourceY - loopRadius) + " " +
-    // arc continuing around to target side
-    "A" + loopRadius + " " + loopRadius + " 0 0 0 " +
-    startX + " " + targetY + " " +
-    // line back to node
-    "L" + sourceX + " " + targetY;
+  if (link.circularLinkType == "top") {
+    // Top loop: from right-top edge, semicircle above, to left-top edge
+    var y = link.source.y0; // top of node
+    
+    pathString = 
+      // start at right edge, top of node
+      "M" + sourceX + " " + y + " " +
+      // semicircle arc going up and around (counter-clockwise)
+      // A rx ry x-rotation large-arc-flag sweep-flag x y
+      "A" + radius + " " + radius + " 0 1 0 " +
+      targetX + " " + y;
+  } else {
+    // Bottom loop: from right-bottom edge, semicircle below, to left-bottom edge
+    var y = link.source.y1; // bottom of node
+    
+    pathString = 
+      // start at right edge, bottom of node
+      "M" + sourceX + " " + y + " " +
+      // semicircle arc going down and around (clockwise)
+      "A" + radius + " " + radius + " 0 1 1 " +
+      targetX + " " + y;
+  }
   
   return pathString;
 }

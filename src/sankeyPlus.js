@@ -9,7 +9,6 @@ import {
   linkTargetCenter,
   linkSourceCenter,
   nodeCenter,
-  getSelfLinksHeight,
 } from "./nodeAttributes.js";
 import { selfLinking } from "./linkAttributes.js";
 import { left, right, center, justify } from "./align.js";
@@ -591,8 +590,6 @@ function resolveCollisionsAndRelax() {
 
   // For each column, check if nodes are overlapping, and if so, shift up/down
   function resolveCollisions() {
-    const baseRadius = this.config.links.circularRadius || 10;
-    
     columns.forEach((nodes) => {
       var node,
         dy,
@@ -615,12 +612,7 @@ function resolveCollisionsAndRelax() {
           node.y0 += dy;
           node.y1 += dy;
         }
-        
-        // Calculate self-links height for this node and store it
-        node.selfLinksHeight = getSelfLinksHeight(node, id, baseRadius);
-        
-        // Add extra space for self-links
-        y = node.y1 + nodePadding + node.selfLinksHeight;
+        y = node.y1 + nodePadding;
       }
 
       // If the bottommost node goes outside the bounds, push it back up.
@@ -631,7 +623,7 @@ function resolveCollisionsAndRelax() {
         // Push any overlapping nodes back up.
         for (i = n - 2; i >= 0; --i) {
           node = nodes[i];
-          dy = node.y1 + minNodePadding + (node.selfLinksHeight || 0) - y;
+          dy = node.y1 + minNodePadding - y;
           if (dy > 0) (node.y0 -= dy), (node.y1 -= dy);
           y = node.y0;
         }
