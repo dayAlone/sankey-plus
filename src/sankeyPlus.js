@@ -1012,6 +1012,11 @@ class SankeyChart {
         types: null, // e.g. { "optimal": { name: "Optimal", color: "green" }, "critical": { name: "Critical", color: "red" } }
         typeAccessor: (d) => d.type, // function to get link type from data
         typeOrder: null, // e.g. ["critical", "primary", "secondary"] - order from top to bottom
+        // How many times to alternate source/target link sorting before fillHeight().
+        // More iterations can reduce crossings, especially with virtual routes enabled.
+        sortIterations: 6,
+        // Additional sorting passes after fillHeight() so ports match final scaled positions/widths.
+        postSortIterations: 2,
       },
       arrows: {
         enabled: false,
@@ -1130,9 +1135,45 @@ class SankeyChart {
       this.config.links.verticalMargin
     );
 
-    this.graph = sortSourceLinks(this.graph, this.config.id, this.config.links.typeOrder, this.config.links.typeAccessor);
-    this.graph = sortTargetLinks(this.graph, this.config.id, this.config.links.typeOrder, this.config.links.typeAccessor);
+    const sortIters =
+      typeof this.config.links.sortIterations === "number"
+        ? Math.max(1, Math.floor(this.config.links.sortIterations))
+        : 1;
+    for (let i = 0; i < sortIters; i++) {
+      this.graph = sortSourceLinks(
+        this.graph,
+        this.config.id,
+        this.config.links.typeOrder,
+        this.config.links.typeAccessor
+      );
+      this.graph = sortTargetLinks(
+        this.graph,
+        this.config.id,
+        this.config.links.typeOrder,
+        this.config.links.typeAccessor
+      );
+    }
+
     this.graph = fillHeight(this.graph);
+
+    const postSortIters =
+      typeof this.config.links.postSortIterations === "number"
+        ? Math.max(0, Math.floor(this.config.links.postSortIterations))
+        : 0;
+    for (let i = 0; i < postSortIters; i++) {
+      this.graph = sortSourceLinks(
+        this.graph,
+        this.config.id,
+        this.config.links.typeOrder,
+        this.config.links.typeAccessor
+      );
+      this.graph = sortTargetLinks(
+        this.graph,
+        this.config.id,
+        this.config.links.typeOrder,
+        this.config.links.typeAccessor
+      );
+    }
 
     this.graph = addCircularPathData(
       this.graph,
