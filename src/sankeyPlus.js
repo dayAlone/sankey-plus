@@ -689,13 +689,17 @@ function resolveCollisionsAndRelax() {
 
       // Second pass: position nodes with space for self-links
       // Calculate total height needed for nodes and self-links
-      let totalNodesHeight = nodes.reduce((sum, n) => sum + (n.y1 - n.y0), 0);
+      // Use node.value * graph.ky instead of y1 - y0 because nodes may not be positioned yet
+      let totalNodesHeight = nodes.reduce((sum, n) => sum + (n.value * graph.ky), 0);
       let totalSelfLinksHeight = nodes.reduce((sum, n) => sum + (n.selfLinksHeight ? n.selfLinksHeight.top + n.selfLinksHeight.bottom : 0), 0);
       let availableHeight = graph.y1 - graph.y0;
       let maxTotalPadding = availableHeight - totalNodesHeight - totalSelfLinksHeight;
       
       // Cap padding per node to prevent huge gaps when scale is small
-      let maxPaddingPerNode = maxTotalPadding > 0 ? Math.min(nodePadding * 2, maxTotalPadding / Math.max(1, n - 1)) : nodePadding;
+      // Use reasonable max padding (2x nodePadding) but don't exceed available space
+      let maxPaddingPerNode = maxTotalPadding > 0 
+        ? Math.min(nodePadding * 2, maxTotalPadding / Math.max(1, n - 1)) 
+        : nodePadding;
       
       for (i = 0; i < n; ++i) {
         node = nodes[i];
