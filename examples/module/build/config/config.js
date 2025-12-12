@@ -35,12 +35,11 @@ export const config = {
     virtualLinkType: "both", // ["both", "bezier", "virtual"]
     color: "lightgrey", // default color for links without type
     types: {
-      primary: { name: "Primary Flow", color: "#2196F3" },
-      secondary: { name: "Secondary Flow", color: "#9E9E9E" },
-      critical: { name: "Critical Path", color: "#F44336" },
+      primary: { name: "Основной поток", color: "#2196F3" },
+      secondary: { name: "Вторичный поток", color: "#9E9E9E" },
+      critical: { name: "Критический путь", color: "#F44336" },
     },
     typeAccessor: (d) => d.type, // function to get link type from data
-    typeOrder: ["critical", "secondary", "primary"], // order from top to bottom: critical (orange) at top, primary (blue) at bottom
   },
   arrows: {
     enabled: true,

@@ -1,6 +1,6 @@
 import { find } from "./find.js";
 //import { constant } from './constant.js';
-import {group, groups, sum, mean, min, max, select, range, scaleLinear, linkHorizontal} from "d3";
+import {group, sum, mean, min, max, select, range} from "d3";
 import { findCircuits } from "./networks/elementaryCircuits.js";
 import {
   getNodeID,
@@ -9,7 +9,6 @@ import {
   linkTargetCenter,
   linkSourceCenter,
   nodeCenter,
-  getSelfLinksHeight,
 } from "./nodeAttributes.js";
 import { selfLinking } from "./linkAttributes.js";
 import { left, right, center, justify } from "./align.js";
@@ -188,59 +187,17 @@ function selectCircularLinkTypes(inputGraph, id) {
     }
   });
 
-  // First pass: determine types for non-self circular links based on vertical positions
+  //correct self-linking links to be same direction as node
   graph.links.forEach(function (link) {
-    if (link.circular && !selfLinking(link, id)) {
-      var sourceCenter = (link.source.y0 + link.source.y1) / 2;
-      var targetCenter = (link.target.y0 + link.target.y1) / 2;
-      
-      // Check if this is a forward circular link (goes left to right but is part of cycle)
-      var isForwardCircular = link.target.column > link.source.column;
-      
-      if (isForwardCircular) {
-        // Forward circular links: route above the main flow to avoid crossing
-        if (targetCenter >= sourceCenter) {
-          link.circularLinkType = "top";
-        } else {
-          link.circularLinkType = "bottom";
-        }
-      } else {
-        // Backward circular links: route towards target
-        if (targetCenter < sourceCenter) {
-          link.circularLinkType = "top";
-        } else if (targetCenter > sourceCenter) {
-          link.circularLinkType = "bottom";
-        }
+    if (link.circular) {
+      //if both source and target node are same type, then link should have same type
+      if (link.source.circularLinkType == link.target.circularLinkType) {
+        link.circularLinkType = link.source.circularLinkType;
       }
-    }
-  });
-  
-  // Second pass: determine types for self-links based on other circular links of the same node
-  graph.links.forEach(function (link) {
-    if (link.circular && selfLinking(link, id)) {
-      // Find the predominant type of other circular links for this node
-      var topCount = 0;
-      var bottomCount = 0;
-      
-      link.source.sourceLinks.forEach(function(l) {
-        if (l.circular && !selfLinking(l, id)) {
-          if (l.circularLinkType === "top") topCount++;
-          else if (l.circularLinkType === "bottom") bottomCount++;
-        }
-      });
-      link.source.targetLinks.forEach(function(l) {
-        if (l.circular && !selfLinking(l, id)) {
-          if (l.circularLinkType === "top") topCount++;
-          else if (l.circularLinkType === "bottom") bottomCount++;
-        }
-      });
-      
-      if (topCount > 0 || bottomCount > 0) {
-        // Put self-link on opposite side from majority of other circular links
-        var otherType = topCount >= bottomCount ? "top" : "bottom";
-        link.circularLinkType = otherType === "top" ? "bottom" : "top";
+      //if link is selflinking, then link should have same type as node
+      if (selfLinking(link, id)) {
+        link.circularLinkType = link.source.circularLinkType;
       }
-      // else keep the type assigned earlier (for nodes with only self-links)
     }
   });
 
@@ -353,9 +310,9 @@ function createVirtualNodes(inputGraph, useVirtualRoutes, id) {
 
       //if the link spans more than 1 column, then replace it with virtual nodes and links
       if (thisLink.target.column - thisLink.source.column < 2) {
-        thisLink.linkType = "normal";
+        thisLink.type = "normal";
       } else {
-        thisLink.linkType = "replaced";
+        thisLink.type = "replaced";
 
         let totalToCreate = thisLink.target.column - thisLink.source.column - 1;
 
@@ -387,7 +344,7 @@ function createVirtualNodes(inputGraph, useVirtualRoutes, id) {
           newLink.index = "virtualLink" + virtualLinkIndex;
           virtualLinkIndex = virtualLinkIndex + 1;
           newLink.circular = false;
-          newLink.linkType = "virtual";
+          newLink.type = "virtual";
           newLink.parentLink = thisLink.index;
 
           graph.links.push(newLink);
@@ -401,7 +358,7 @@ function createVirtualNodes(inputGraph, useVirtualRoutes, id) {
         lastLink.index = "virtualLink" + virtualLinkIndex;
         virtualLinkIndex = virtualLinkIndex + 1;
         lastLink.circular = false;
-        lastLink.linkType = "virtual";
+        lastLink.type = "virtual";
         lastLink.parentLink = thisLink.index;
 
         graph.links.push(lastLink);
@@ -411,7 +368,7 @@ function createVirtualNodes(inputGraph, useVirtualRoutes, id) {
     let nodeByID = createMap(graph.nodes, id);
 
     graph.links.forEach(function (link, i) {
-      if (link.linkType == "virtual") {
+      if (link.type == "virtual") {
         var source = link.source;
         var target = link.target;
         if (
@@ -433,7 +390,7 @@ function createVirtualNodes(inputGraph, useVirtualRoutes, id) {
 
     let l = graph.links.length;
     while (l--) {
-      if (graph.links[l].linkType == "replaced") {
+      if (graph.links[l].type == "replaced") {
         let obj = clone(graph.links[l]);
         graph.links.splice(l, 1);
         graph.replacedLinks.push(obj);
@@ -443,14 +400,14 @@ function createVirtualNodes(inputGraph, useVirtualRoutes, id) {
     graph.nodes.forEach(function (node) {
       let sIndex = node.sourceLinks.length;
       while (sIndex--) {
-        if (node.sourceLinks[sIndex].linkType == "replaced") {
+        if (node.sourceLinks[sIndex].type == "replaced") {
           node.sourceLinks.splice(sIndex, 1);
         }
       }
 
       let tIndex = node.targetLinks.length;
       while (tIndex--) {
-        if (node.targetLinks[tIndex].linkType == "replaced") {
+        if (node.targetLinks[tIndex].type == "replaced") {
           node.targetLinks.splice(tIndex, 1);
         }
       }
@@ -467,7 +424,8 @@ function computeNodeBreadths() {
   const setNodePositions = this.config.nodes.setPositions;
   const id = this.config.id;
 
-  let columns = groups(graph.nodes, (d) => d.column)
+  let columns = d3
+    .groups(graph.nodes, (d) => d.column)
     .sort((a, b) => a[0] - b[0])
     .map((d) => d[1]);
 
@@ -567,7 +525,8 @@ function resolveCollisionsAndRelax() {
   const minNodePadding = this.config.nodes.minPadding;
   const iterations = this.config.iterations;
 
-  let columns = groups(graph.nodes, (d) => d.column)
+  let columns = d3
+    .groups(graph.nodes, (d) => d.column)
     .sort((a, b) => a[0] - b[0])
     .map((d) => d[1]);
 
@@ -633,8 +592,6 @@ function resolveCollisionsAndRelax() {
 
   // For each column, check if nodes are overlapping, and if so, shift up/down
   function resolveCollisions() {
-    const baseRadius = this.config.links.circularRadius || 10;
-    
     columns.forEach((nodes) => {
       var node,
         dy,
@@ -649,27 +606,15 @@ function resolveCollisionsAndRelax() {
       ? nodes.sort(customSort)        // use custom values for sorting
       : nodes.sort(ascendingBreadth); // Push any overlapping nodes down.
 
-      // First pass: calculate self-links height for all nodes
-      for (i = 0; i < n; ++i) {
-        nodes[i].selfLinksHeight = getSelfLinksHeight(nodes[i], id, baseRadius);
-      }
-
-      // Second pass: position nodes with space for self-links
       for (i = 0; i < n; ++i) {
         node = nodes[i];
-        
-        // Add space for top self-links before the node
-        y += node.selfLinksHeight.top;
-        
         dy = y - node.y0;
 
         if (dy > 0) {
           node.y0 += dy;
           node.y1 += dy;
         }
-        
-        // Add space for bottom self-links after the node
-        y = node.y1 + nodePadding + node.selfLinksHeight.bottom;
+        y = node.y1 + nodePadding;
       }
 
       // If the bottommost node goes outside the bounds, push it back up.
@@ -680,9 +625,7 @@ function resolveCollisionsAndRelax() {
         // Push any overlapping nodes back up.
         for (i = n - 2; i >= 0; --i) {
           node = nodes[i];
-          var selfLinkSpace = (node.selfLinksHeight ? node.selfLinksHeight.bottom : 0) + 
-                              (nodes[i+1] && nodes[i+1].selfLinksHeight ? nodes[i+1].selfLinksHeight.top : 0);
-          dy = node.y1 + minNodePadding + selfLinkSpace - y;
+          dy = node.y1 + minNodePadding - y;
           if (dy > 0) (node.y0 -= dy), (node.y1 -= dy);
           y = node.y0;
         }
@@ -795,7 +738,8 @@ function fillHeight(inputGraph) {
     var chartHeight = graph.y1 - graph.y0;
     var ratio = chartHeight / currentHeight;
 
-    let moveScale = scaleLinear()
+    let moveScale = d3
+      .scaleLinear()
       .domain([minY0, maxY1])
       .range([graph.y0, graph.y1]);
 
@@ -919,7 +863,8 @@ function addVirtualPathData(inputGraph, virtualLinkType) {
 
       replacedLink.path = pathString;
     } else {
-      var normalPath = linkHorizontal()
+      var normalPath = d3
+        .linkHorizontal()
         .source(function (d) {
           var x = d.x0;
           var y = d.y0;
@@ -939,7 +884,7 @@ function addVirtualPathData(inputGraph, virtualLinkType) {
 
   let l = graph.links.length;
   while (l--) {
-    if (graph.links[l].linkType == "virtual") {
+    if (graph.links[l].type == "virtual") {
       let obj = clone(graph.links[l]);
       graph.links.splice(l, 1);
       graph.virtualLinks.push(obj);
@@ -1002,7 +947,6 @@ class SankeyChart {
         color: "lightgrey",
         types: null, // e.g. { "optimal": { name: "Optimal", color: "green" }, "critical": { name: "Critical", color: "red" } }
         typeAccessor: (d) => d.type, // function to get link type from data
-        typeOrder: null, // e.g. ["critical", "primary", "secondary"] - order from top to bottom
       },
       arrows: {
         enabled: false,
@@ -1121,8 +1065,8 @@ class SankeyChart {
       this.config.links.verticalMargin
     );
 
-    this.graph = sortSourceLinks(this.graph, this.config.id, this.config.links.typeOrder, this.config.links.typeAccessor);
-    this.graph = sortTargetLinks(this.graph, this.config.id, this.config.links.typeOrder, this.config.links.typeAccessor);
+    this.graph = sortSourceLinks(this.graph, this.config.id);
+    this.graph = sortTargetLinks(this.graph, this.config.id);
     this.graph = fillHeight(this.graph);
 
     this.graph = addCircularPathData(
@@ -1225,14 +1169,7 @@ class SankeyChart {
       .style("stroke", getLinkColor);
 
     link.append("title").text(function (d) {
-      let typeName = "";
-      if (linkTypes && typeAccessor) {
-        const linkType = typeAccessor(d);
-        if (linkType && linkTypes[linkType]) {
-          typeName = "\nType: " + linkTypes[linkType].name;
-        }
-      }
-      return d.source.name + " -> " + d.target.name + "\nIndex: " + d.index + typeName;
+      return d.source.name + " → " + d.target.name + "\n Index: " + d.index;
     });
 
     svg

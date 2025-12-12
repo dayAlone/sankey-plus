@@ -116,6 +116,7 @@
             critical: { name: "Critical Path", color: "#F44336" },
           },
           typeAccessor: (d) => d.type,
+          typeOrder: ["critical", "secondary", "primary"], // order from top to bottom: critical (red) at top, primary (blue) at bottom
         },
         arrows: {
           enabled: true,

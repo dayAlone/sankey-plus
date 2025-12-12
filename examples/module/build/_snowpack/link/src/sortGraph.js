@@ -67,7 +67,7 @@ export function ascendingBreadth(a, b) {
 
 
   // sort and set the links' y0 for each node
-export function sortSourceLinks(inputGraph, id, typeOrder = null, typeAccessor = null) {
+export function sortSourceLinks(inputGraph, id) {
 
   let graph = inputGraph;
 
@@ -86,20 +86,6 @@ export function sortSourceLinks(inputGraph, id, typeOrder = null, typeAccessor =
     // if more than 1 link then sort
     if (nodeSourceLinksLength > 1) {
       nodesSourceLinks.sort(function(link1, link2) {
-        // First, sort by type if typeOrder is provided
-        if (typeOrder && typeAccessor) {
-          var type1 = typeAccessor(link1);
-          var type2 = typeAccessor(link2);
-          var typeIndex1 = typeOrder.indexOf(type1);
-          var typeIndex2 = typeOrder.indexOf(type2);
-          // If type not in order array, put at end
-          if (typeIndex1 === -1) typeIndex1 = typeOrder.length;
-          if (typeIndex2 === -1) typeIndex2 = typeOrder.length;
-          if (typeIndex1 !== typeIndex2) {
-            return typeIndex1 - typeIndex2;
-          }
-        }
-
         // if both are not circular...
         if (!link1.circular && !link2.circular) {
           // if the target nodes are the same column, then sort by the link's target y
@@ -190,7 +176,7 @@ export function sortSourceLinks(inputGraph, id, typeOrder = null, typeAccessor =
 
 
 // sort and set the links' y1 for each node
-export function sortTargetLinks(inputGraph, id, typeOrder = null, typeAccessor = null) {
+export function sortTargetLinks(inputGraph, id) {
   let graph = inputGraph;
 
   graph.nodes.forEach(function(node) {
@@ -202,20 +188,6 @@ export function sortTargetLinks(inputGraph, id, typeOrder = null, typeAccessor =
 
     if (nodesTargetLinksLength > 1) {
       nodesTargetLinks.sort(function(link1, link2) {
-        // First, sort by type if typeOrder is provided
-        if (typeOrder && typeAccessor) {
-          var type1 = typeAccessor(link1);
-          var type2 = typeAccessor(link2);
-          var typeIndex1 = typeOrder.indexOf(type1);
-          var typeIndex2 = typeOrder.indexOf(type2);
-          // If type not in order array, put at end
-          if (typeIndex1 === -1) typeIndex1 = typeOrder.length;
-          if (typeIndex2 === -1) typeIndex2 = typeOrder.length;
-          if (typeIndex1 !== typeIndex2) {
-            return typeIndex1 - typeIndex2;
-          }
-        }
-
         // if both are not circular, the base on the source y position
         if (!link1.circular && !link2.circular) {
           if (link1.source.column == link2.source.column) {
