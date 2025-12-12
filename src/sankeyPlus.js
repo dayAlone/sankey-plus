@@ -188,13 +188,9 @@ function selectCircularLinkTypes(inputGraph, id) {
     }
   });
 
-  //correct self-linking links to be opposite direction from node's other circular links
+  //correct circular link types based on vertical positions
   graph.links.forEach(function (link) {
     if (link.circular) {
-      //if both source and target node are same type, then link should have same type
-      if (link.source.circularLinkType == link.target.circularLinkType) {
-        link.circularLinkType = link.source.circularLinkType;
-      }
       //if link is selflinking, then link should have opposite type from node's other circular links
       if (selfLinking(link, id)) {
         // Check if node has other circular links (not self-links)
@@ -208,7 +204,20 @@ function selectCircularLinkTypes(inputGraph, id) {
           // Put self-link on opposite side from other circular links
           link.circularLinkType = link.source.circularLinkType === "top" ? "bottom" : "top";
         }
-        // else keep the same type as assigned (for nodes with only self-links)
+      } else {
+        // For non-self-links: determine type based on vertical position of source vs target
+        // If source is above target, go top; if source is below target, go bottom
+        var sourceCenter = (link.source.y0 + link.source.y1) / 2;
+        var targetCenter = (link.target.y0 + link.target.y1) / 2;
+        
+        if (sourceCenter < targetCenter) {
+          // Source is above target - route via top
+          link.circularLinkType = "top";
+        } else if (sourceCenter > targetCenter) {
+          // Source is below target - route via bottom
+          link.circularLinkType = "bottom";
+        }
+        // If same level, keep the type assigned earlier
       }
     }
   });
