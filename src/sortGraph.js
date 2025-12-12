@@ -77,10 +77,8 @@ export function sortSourceLinks(inputGraph, id, typeOrder = null, typeAccessor =
       node.y = node.y - (node.y + (node.y1 - node.y0) - graph.y1);
     }
 
-    var nodesSourceLinks = graph.links.filter(function(l) {
-      return getNodeID(l.source, id) == getNodeID(node, id);
-    });
-
+    // Use node.sourceLinks directly instead of filtering graph.links
+    var nodesSourceLinks = node.sourceLinks;
     var nodeSourceLinksLength = nodesSourceLinks.length;
 
     // if more than 1 link then sort
@@ -183,10 +181,8 @@ export function sortTargetLinks(inputGraph, id, typeOrder = null, typeAccessor =
   let graph = inputGraph;
 
   graph.nodes.forEach(function(node) {
-    var nodesTargetLinks = graph.links.filter(function(l) {
-      return getNodeID(l.target, id) == getNodeID(node, id);
-    });
-
+    // Use node.targetLinks directly instead of filtering graph.links
+    var nodesTargetLinks = node.targetLinks;
     var nodesTargetLinksLength = nodesTargetLinks.length;
 
     if (nodesTargetLinksLength > 1) {
