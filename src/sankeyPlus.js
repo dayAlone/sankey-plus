@@ -1003,6 +1003,7 @@ class SankeyChart {
         types: null, // e.g. { "optimal": { name: "Optimal", color: "green" }, "critical": { name: "Critical", color: "red" } }
         typeAccessor: (d) => d.type, // function to get link type from data
         typeOrder: null, // e.g. ["critical", "primary", "secondary"] - order from top to bottom
+        sortIterations: 6, // repeated source/target sorting passes to reduce crossings
       },
       arrows: {
         enabled: false,
@@ -1121,8 +1122,25 @@ class SankeyChart {
       this.config.links.verticalMargin
     );
 
-    this.graph = sortSourceLinks(this.graph, this.config.id, this.config.links.typeOrder, this.config.links.typeAccessor);
-    this.graph = sortTargetLinks(this.graph, this.config.id, this.config.links.typeOrder, this.config.links.typeAccessor);
+    // Iteratively sort source/target link orders to converge and reduce crossings.
+    const sortIters =
+      typeof this.config.links.sortIterations === "number"
+        ? Math.max(1, Math.floor(this.config.links.sortIterations))
+        : 1;
+    for (let i = 0; i < sortIters; i++) {
+      this.graph = sortSourceLinks(
+        this.graph,
+        this.config.id,
+        this.config.links.typeOrder,
+        this.config.links.typeAccessor
+      );
+      this.graph = sortTargetLinks(
+        this.graph,
+        this.config.id,
+        this.config.links.typeOrder,
+        this.config.links.typeAccessor
+      );
+    }
     this.graph = fillHeight(this.graph);
 
     this.graph = addCircularPathData(
