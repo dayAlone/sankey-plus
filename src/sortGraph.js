@@ -86,7 +86,42 @@ export function sortSourceLinks(inputGraph, id, typeOrder = null, typeAccessor =
     // if more than 1 link then sort
     if (nodeSourceLinksLength > 1) {
       nodesSourceLinks.sort(function(link1, link2) {
-        // First, sort by type if typeOrder is provided
+        // FIRST: Handle circular vs non-circular - circular links go to top/bottom of node
+        // if only one is circular, the move top links up, or bottom links down
+        if (link1.circular && !link2.circular) {
+          return link1.circularLinkType == 'top' ? -1 : 1;
+        } else if (link2.circular && !link1.circular) {
+          return link2.circularLinkType == 'top' ? 1 : -1;
+        }
+
+        // if both links are circular...
+        if (link1.circular && link2.circular) {
+          // ...and they loop around different ways, the move top up and bottom down
+          if (link1.circularLinkType !== link2.circularLinkType) {
+            return link1.circularLinkType == 'top' ? -1 : 1;
+          }
+          // ...and they both loop the same way (both top)
+          if (link1.circularLinkType == 'top') {
+            // ...and they both connect to a target with same column, then sort by the target's y
+            if (link1.target.column === link2.target.column) {
+              return link1.target.y1 - link2.target.y1;
+            } else {
+              // ...and they connect to different column targets, then sort by how far back they
+              return link2.target.column - link1.target.column;
+            }
+          } else {
+            // ...and they both loop the same way (both bottom)
+            // ...and they both connect to a target with same column, then sort by the target's y
+            if (link1.target.column === link2.target.column) {
+              return link2.target.y1 - link1.target.y1;
+            } else {
+              // ...and they connect to different column targets, then sort by how far back they
+              return link1.target.column - link2.target.column;
+            }
+          }
+        }
+
+        // SECOND: For non-circular links, sort by type if typeOrder is provided
         if (typeOrder && typeAccessor) {
           var type1 = typeAccessor(link1);
           var type2 = typeAccessor(link2);
@@ -100,7 +135,7 @@ export function sortSourceLinks(inputGraph, id, typeOrder = null, typeAccessor =
           }
         }
 
-        // if both are not circular...
+        // THIRD: if both are not circular...
         if (!link1.circular && !link2.circular) {
           // if the target nodes are the same column, then sort by the link's target y
           if (link1.target.column == link2.target.column) {
@@ -119,45 +154,6 @@ export function sortSourceLinks(inputGraph, id, typeOrder = null, typeAccessor =
               var link1Adj = linkPerpendicularYToLinkTarget(link1, link2);
               return link1Adj - link2.y1;
             }
-          }
-        }
-
-        // if only one is circular, the move top links up, or bottom links down
-        if (link1.circular && !link2.circular) {
-          return link1.circularLinkType == 'top' ? -1 : 1;
-        } else if (link2.circular && !link1.circular) {
-          return link2.circularLinkType == 'top' ? 1 : -1;
-        }
-
-        // if both links are circular...
-        if (link1.circular && link2.circular) {
-          // ...and they both loop the same way (both top)
-          if (
-            link1.circularLinkType === link2.circularLinkType &&
-            link1.circularLinkType == 'top'
-          ) {
-            // ...and they both connect to a target with same column, then sort by the target's y
-            if (link1.target.column === link2.target.column) {
-              return link1.target.y1 - link2.target.y1;
-            } else {
-              // ...and they connect to different column targets, then sort by how far back they
-              return link2.target.column - link1.target.column;
-            }
-          } else if (
-            link1.circularLinkType === link2.circularLinkType &&
-            link1.circularLinkType == 'bottom'
-          ) {
-            // ...and they both loop the same way (both bottom)
-            // ...and they both connect to a target with same column, then sort by the target's y
-            if (link1.target.column === link2.target.column) {
-              return link2.target.y1 - link1.target.y1;
-            } else {
-              // ...and they connect to different column targets, then sort by how far back they
-              return link1.target.column - link2.target.column;
-            }
-          } else {
-            // ...and they loop around different ways, the move top up and bottom down
-            return link1.circularLinkType == 'top' ? -1 : 1;
           }
         }
       });
@@ -202,7 +198,42 @@ export function sortTargetLinks(inputGraph, id, typeOrder = null, typeAccessor =
 
     if (nodesTargetLinksLength > 1) {
       nodesTargetLinks.sort(function(link1, link2) {
-        // First, sort by type if typeOrder is provided
+        // FIRST: Handle circular vs non-circular - circular links go to top/bottom of node
+        // if only one is circular, the move top links up, or bottom links down
+        if (link1.circular && !link2.circular) {
+          return link1.circularLinkType == 'top' ? -1 : 1;
+        } else if (link2.circular && !link1.circular) {
+          return link2.circularLinkType == 'top' ? 1 : -1;
+        }
+
+        // if both links are circular...
+        if (link1.circular && link2.circular) {
+          // ...and they loop around different ways, the move top up and bottom down
+          if (link1.circularLinkType !== link2.circularLinkType) {
+            return link1.circularLinkType == 'top' ? -1 : 1;
+          }
+          // ...and they both loop the same way (both top)
+          if (link1.circularLinkType == 'top') {
+            // ...and they both connect to a target with same column, then sort by the target's y
+            if (link1.source.column === link2.source.column) {
+              return link1.source.y1 - link2.source.y1;
+            } else {
+              // ...and they connect to different column targets, then sort by how far back they
+              return link1.source.column - link2.source.column;
+            }
+          } else {
+            // ...and they both loop the same way (both bottom)
+            // ...and they both connect to a target with same column, then sort by the target's y
+            if (link1.source.column === link2.source.column) {
+              return link1.source.y1 - link2.source.y1;
+            } else {
+              // ...and they connect to different column targets, then sort by how far back they
+              return link2.source.column - link1.source.column;
+            }
+          }
+        }
+
+        // SECOND: For non-circular links, sort by type if typeOrder is provided
         if (typeOrder && typeAccessor) {
           var type1 = typeAccessor(link1);
           var type2 = typeAccessor(link2);
@@ -216,7 +247,7 @@ export function sortTargetLinks(inputGraph, id, typeOrder = null, typeAccessor =
           }
         }
 
-        // if both are not circular, the base on the source y position
+        // THIRD: if both are not circular, the base on the source y position
         if (!link1.circular && !link2.circular) {
           if (link1.source.column == link2.source.column) {
             return link1.y0 - link2.y0;
@@ -234,45 +265,6 @@ export function sortTargetLinks(inputGraph, id, typeOrder = null, typeAccessor =
 
               return link1Adj - link2.y0;
             }
-          }
-        }
-
-        // if only one is circular, the move top links up, or bottom links down
-        if (link1.circular && !link2.circular) {
-          return link1.circularLinkType == 'top' ? -1 : 1;
-        } else if (link2.circular && !link1.circular) {
-          return link2.circularLinkType == 'top' ? 1 : -1;
-        }
-
-        // if both links are circular...
-        if (link1.circular && link2.circular) {
-          // ...and they both loop the same way (both top)
-          if (
-            link1.circularLinkType === link2.circularLinkType &&
-            link1.circularLinkType == 'top'
-          ) {
-            // ...and they both connect to a target with same column, then sort by the target's y
-            if (link1.source.column === link2.source.column) {
-              return link1.source.y1 - link2.source.y1;
-            } else {
-              // ...and they connect to different column targets, then sort by how far back they
-              return link1.source.column - link2.source.column;
-            }
-          } else if (
-            link1.circularLinkType === link2.circularLinkType &&
-            link1.circularLinkType == 'bottom'
-          ) {
-            // ...and they both loop the same way (both bottom)
-            // ...and they both connect to a target with same column, then sort by the target's y
-            if (link1.source.column === link2.source.column) {
-              return link1.source.y1 - link2.source.y1;
-            } else {
-              // ...and they connect to different column targets, then sort by how far back they
-              return link2.source.column - link1.source.column;
-            }
-          } else {
-            // ...and they loop around different ways, the move top up and bottom down
-            return link1.circularLinkType == 'top' ? -1 : 1;
           }
         }
       });
