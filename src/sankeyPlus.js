@@ -205,16 +205,16 @@ function selectCircularLinkTypes(inputGraph, id) {
           link.circularLinkType = link.source.circularLinkType === "top" ? "bottom" : "top";
         }
       } else {
-        // For non-self-links: determine type based on vertical position of source vs target
-        // If source is above target, go top; if source is below target, go bottom
+        // For non-self-links: determine type based on vertical position of target
+        // Route towards the target - if target is higher, go top; if lower, go bottom
         var sourceCenter = (link.source.y0 + link.source.y1) / 2;
         var targetCenter = (link.target.y0 + link.target.y1) / 2;
         
-        if (sourceCenter < targetCenter) {
-          // Source is above target - route via top
+        if (targetCenter < sourceCenter) {
+          // Target is above source - route via top to reach it
           link.circularLinkType = "top";
-        } else if (sourceCenter > targetCenter) {
-          // Source is below target - route via bottom
+        } else if (targetCenter > sourceCenter) {
+          // Target is below source - route via bottom to reach it
           link.circularLinkType = "bottom";
         }
         // If same level, keep the type assigned earlier
