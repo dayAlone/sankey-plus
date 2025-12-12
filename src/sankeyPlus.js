@@ -187,16 +187,16 @@ function selectCircularLinkTypes(inputGraph, id) {
     }
   });
 
-  //correct self-linking links to be same direction as node
+  //correct self-linking links to be opposite direction from node's other circular links
   graph.links.forEach(function (link) {
     if (link.circular) {
       //if both source and target node are same type, then link should have same type
       if (link.source.circularLinkType == link.target.circularLinkType) {
         link.circularLinkType = link.source.circularLinkType;
       }
-      //if link is selflinking, then link should have same type as node
+      //if link is selflinking, then link should have opposite type from node
       if (selfLinking(link, id)) {
-        link.circularLinkType = link.source.circularLinkType;
+        link.circularLinkType = link.source.circularLinkType === "top" ? "bottom" : "top";
       }
     }
   });
