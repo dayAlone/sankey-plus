@@ -618,8 +618,18 @@ function resolveCollisionsAndRelax() {
       ? nodes.sort(customSort)        // use custom values for sorting
       : nodes.sort(ascendingBreadth); // Push any overlapping nodes down.
 
+      // First pass: calculate self-links height for all nodes
+      for (i = 0; i < n; ++i) {
+        nodes[i].selfLinksHeight = getSelfLinksHeight(nodes[i], id, baseRadius);
+      }
+
+      // Second pass: position nodes with space for self-links
       for (i = 0; i < n; ++i) {
         node = nodes[i];
+        
+        // Add space for top self-links before the node
+        y += node.selfLinksHeight.top;
+        
         dy = y - node.y0;
 
         if (dy > 0) {
@@ -627,10 +637,8 @@ function resolveCollisionsAndRelax() {
           node.y1 += dy;
         }
         
-        // Calculate extra space needed for self-links
-        node.selfLinksHeight = getSelfLinksHeight(node, id, baseRadius);
-        
-        y = node.y1 + nodePadding + node.selfLinksHeight;
+        // Add space for bottom self-links after the node
+        y = node.y1 + nodePadding + node.selfLinksHeight.bottom;
       }
 
       // If the bottommost node goes outside the bounds, push it back up.
@@ -641,7 +649,9 @@ function resolveCollisionsAndRelax() {
         // Push any overlapping nodes back up.
         for (i = n - 2; i >= 0; --i) {
           node = nodes[i];
-          dy = node.y1 + minNodePadding + (node.selfLinksHeight || 0) - y;
+          var selfLinkSpace = (node.selfLinksHeight ? node.selfLinksHeight.bottom : 0) + 
+                              (nodes[i+1] && nodes[i+1].selfLinksHeight ? nodes[i+1].selfLinksHeight.top : 0);
+          dy = node.y1 + minNodePadding + selfLinkSpace - y;
           if (dy > 0) (node.y0 -= dy), (node.y1 -= dy);
           y = node.y0;
         }
