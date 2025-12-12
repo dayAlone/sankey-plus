@@ -182,26 +182,18 @@ export function addCircularPathData(
     if (link.circular) {
       link.path = createCircularPathString(link);
     } else {
-      // Check if this forward link should bypass (go around) instead of crossing
-      var shouldBypass = checkIfLinkShouldBypass(link, graph, id);
-      
-      if (shouldBypass) {
-        // Create a bypass path that goes above/below the nodes
-        link.path = createBypassPathString(link, graph, baseRadius);
-      } else {
-        var normalPath = linkHorizontal()
-          .source(function (d) {
-            var x = d.source.x0 + (d.source.x1 - d.source.x0);
-            var y = d.y0;
-            return [x, y];
-          })
-          .target(function (d) {
-            var x = d.target.x0;
-            var y = d.y1;
-            return [x, y];
-          });
-        link.path = normalPath(link);
-      }
+      var normalPath = linkHorizontal()
+        .source(function (d) {
+          var x = d.source.x0 + (d.source.x1 - d.source.x0);
+          var y = d.y0;
+          return [x, y];
+        })
+        .target(function (d) {
+          var x = d.target.x0;
+          var y = d.y1;
+          return [x, y];
+        });
+      link.path = normalPath(link);
     }
   });
 
@@ -422,120 +414,5 @@ function createCircularPathString(link) {
       link.circularPathData.targetY;
   }
 
-  return pathString;
-}
-
-// Check if a forward link should bypass (go around) instead of crossing through nodes
-function checkIfLinkShouldBypass(link, graph, id) {
-  // Get source and target positions
-  var sourceY = link.y0;
-  var targetY = link.y1;
-  
-  // Check vertical distance - the main criterion
-  var verticalDistance = Math.abs(targetY - sourceY);
-  
-  // Get node heights to compare
-  var sourceNodeHeight = link.source.y1 - link.source.y0;
-  var targetNodeHeight = link.target.y1 - link.target.y0;
-  var avgNodeHeight = (sourceNodeHeight + targetNodeHeight) / 2;
-  
-  // Bypass if vertical distance is more than 1.5x the average node height
-  // This means the link would cross significant vertical space
-  if (verticalDistance > avgNodeHeight * 1.5) {
-    return true;
-  }
-  
-  // Also check if there are nodes in between that would be crossed
-  var minY = Math.min(sourceY, targetY);
-  var maxY = Math.max(sourceY, targetY);
-  
-  var nodesCrossed = 0;
-  graph.nodes.forEach(function(node) {
-    // Check if node is in a column between source and target
-    if (node.column > link.source.column && node.column < link.target.column) {
-      // Check if any part of the node is in the vertical range of the link
-      if (node.y1 > minY && node.y0 < maxY) {
-        nodesCrossed++;
-      }
-    }
-  });
-  
-  return nodesCrossed > 0;
-}
-
-// Create a bypass path that goes above the nodes
-function createBypassPathString(link, graph, baseRadius) {
-  var sourceX = link.source.x1;
-  var sourceY = link.y0;
-  var targetX = link.target.x0;
-  var targetY = link.y1;
-  
-  var arcRadius = baseRadius + link.width / 2;
-  var buffer = 5;
-  
-  // Determine if bypass should go top or bottom
-  // Go top if source is higher, bottom if source is lower
-  var goTop = sourceY <= targetY;
-  
-  // Find the extent (how far up/down to go)
-  var extent;
-  if (goTop) {
-    // Find minimum y of all nodes between source and target columns
-    var minNodeY = sourceY;
-    graph.nodes.forEach(function(node) {
-      if (node.column >= link.source.column && node.column <= link.target.column) {
-        if (node.y0 < minNodeY) minNodeY = node.y0;
-      }
-    });
-    extent = minNodeY - arcRadius * 2 - link.width;
-  } else {
-    // Find maximum y of all nodes between source and target columns  
-    var maxNodeY = sourceY;
-    graph.nodes.forEach(function(node) {
-      if (node.column >= link.source.column && node.column <= link.target.column) {
-        if (node.y1 > maxNodeY) maxNodeY = node.y1;
-      }
-    });
-    extent = maxNodeY + arcRadius * 2 + link.width;
-  }
-  
-  var pathString;
-  
-  if (goTop) {
-    // Path going above
-    pathString =
-      "M" + sourceX + " " + sourceY + " " +
-      "L" + (sourceX + buffer) + " " + sourceY + " " +
-      "A" + arcRadius + " " + arcRadius + " 0 0 0 " +
-      (sourceX + buffer + arcRadius) + " " + (sourceY - arcRadius) + " " +
-      "L" + (sourceX + buffer + arcRadius) + " " + (extent + arcRadius) + " " +
-      "A" + arcRadius + " " + arcRadius + " 0 0 0 " +
-      (sourceX + buffer + arcRadius * 2) + " " + extent + " " +
-      "L" + (targetX - buffer - arcRadius * 2) + " " + extent + " " +
-      "A" + arcRadius + " " + arcRadius + " 0 0 0 " +
-      (targetX - buffer - arcRadius) + " " + (extent + arcRadius) + " " +
-      "L" + (targetX - buffer - arcRadius) + " " + (targetY - arcRadius) + " " +
-      "A" + arcRadius + " " + arcRadius + " 0 0 0 " +
-      (targetX - buffer) + " " + targetY + " " +
-      "L" + targetX + " " + targetY;
-  } else {
-    // Path going below
-    pathString =
-      "M" + sourceX + " " + sourceY + " " +
-      "L" + (sourceX + buffer) + " " + sourceY + " " +
-      "A" + arcRadius + " " + arcRadius + " 0 0 1 " +
-      (sourceX + buffer + arcRadius) + " " + (sourceY + arcRadius) + " " +
-      "L" + (sourceX + buffer + arcRadius) + " " + (extent - arcRadius) + " " +
-      "A" + arcRadius + " " + arcRadius + " 0 0 1 " +
-      (sourceX + buffer + arcRadius * 2) + " " + extent + " " +
-      "L" + (targetX - buffer - arcRadius * 2) + " " + extent + " " +
-      "A" + arcRadius + " " + arcRadius + " 0 0 1 " +
-      (targetX - buffer - arcRadius) + " " + (extent - arcRadius) + " " +
-      "L" + (targetX - buffer - arcRadius) + " " + (targetY + arcRadius) + " " +
-      "A" + arcRadius + " " + arcRadius + " 0 0 1 " +
-      (targetX - buffer) + " " + targetY + " " +
-      "L" + targetX + " " + targetY;
-  }
-  
   return pathString;
 }
