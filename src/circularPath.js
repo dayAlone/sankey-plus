@@ -423,45 +423,88 @@ function createCircularPathString(link) {
   return pathString;
 }
 
-// create a self-link path (semicircle from right edge to left edge of node)
+// create a self-link path (rectangular loop with rounded corners, same style as circular links)
 function createSelfLinkPathString(link) {
   // Right edge of node (source)
   var sourceX = link.source.x1;
   // Left edge of node (target)  
   var targetX = link.source.x0;
   
-  // Node width
-  var nodeWidth = sourceX - targetX;
+  // Arc radius for corners
+  var arcRadius = link.circularPathData.arcRadius || (link.width / 2 + 10);
+  var smallArcRadius = Math.min(arcRadius, link.width / 2 + 5);
   
-  // Radius for the semicircle - half the node width plus some padding for the link
-  var radius = nodeWidth / 2 + link.width / 2 + 5;
+  // Buffer from node edge
+  var buffer = 5;
   
-  // Center X of the node
-  var centerX = (sourceX + targetX) / 2;
+  // How far the loop extends from the node
+  var loopExtent = arcRadius + buffer;
   
   var pathString;
   
   if (link.circularLinkType == "top") {
-    // Top loop: from right-top edge, semicircle above, to left-top edge
-    var y = link.source.y0; // top of node
+    // Top loop
+    var sourceY = link.source.y0; // top of node for source
+    var targetY = link.source.y0; // top of node for target
+    var topExtent = sourceY - loopExtent; // how high the loop goes
     
-    pathString = 
-      // start at right edge, top of node
-      "M" + sourceX + " " + y + " " +
-      // semicircle arc going up and around (counter-clockwise)
-      // A rx ry x-rotation large-arc-flag sweep-flag x y
-      "A" + radius + " " + radius + " 0 1 0 " +
-      targetX + " " + y;
+    pathString =
+      // start at right edge of node
+      "M" + sourceX + " " + sourceY + " " +
+      // line right to buffer
+      "L" + (sourceX + buffer) + " " + sourceY + " " +
+      // arc up-right
+      "A" + smallArcRadius + " " + smallArcRadius + " 0 0 0 " +
+      (sourceX + buffer + smallArcRadius) + " " + (sourceY - smallArcRadius) + " " +
+      // line up
+      "L" + (sourceX + buffer + smallArcRadius) + " " + (topExtent + arcRadius) + " " +
+      // arc to go left
+      "A" + arcRadius + " " + arcRadius + " 0 0 0 " +
+      (sourceX + buffer + smallArcRadius - arcRadius) + " " + topExtent + " " +
+      // line left across top
+      "L" + (targetX - buffer - smallArcRadius + arcRadius) + " " + topExtent + " " +
+      // arc to go down
+      "A" + arcRadius + " " + arcRadius + " 0 0 0 " +
+      (targetX - buffer - smallArcRadius) + " " + (topExtent + arcRadius) + " " +
+      // line down
+      "L" + (targetX - buffer - smallArcRadius) + " " + (targetY - smallArcRadius) + " " +
+      // arc to go right
+      "A" + smallArcRadius + " " + smallArcRadius + " 0 0 0 " +
+      (targetX - buffer) + " " + targetY + " " +
+      // line to node
+      "L" + targetX + " " + targetY;
+      
   } else {
-    // Bottom loop: from right-bottom edge, semicircle below, to left-bottom edge
-    var y = link.source.y1; // bottom of node
+    // Bottom loop
+    var sourceY = link.source.y1; // bottom of node for source
+    var targetY = link.source.y1; // bottom of node for target
+    var bottomExtent = sourceY + loopExtent; // how low the loop goes
     
-    pathString = 
-      // start at right edge, bottom of node
-      "M" + sourceX + " " + y + " " +
-      // semicircle arc going down and around (clockwise)
-      "A" + radius + " " + radius + " 0 1 1 " +
-      targetX + " " + y;
+    pathString =
+      // start at right edge of node
+      "M" + sourceX + " " + sourceY + " " +
+      // line right to buffer
+      "L" + (sourceX + buffer) + " " + sourceY + " " +
+      // arc down-right
+      "A" + smallArcRadius + " " + smallArcRadius + " 0 0 1 " +
+      (sourceX + buffer + smallArcRadius) + " " + (sourceY + smallArcRadius) + " " +
+      // line down
+      "L" + (sourceX + buffer + smallArcRadius) + " " + (bottomExtent - arcRadius) + " " +
+      // arc to go left
+      "A" + arcRadius + " " + arcRadius + " 0 0 1 " +
+      (sourceX + buffer + smallArcRadius - arcRadius) + " " + bottomExtent + " " +
+      // line left across bottom
+      "L" + (targetX - buffer - smallArcRadius + arcRadius) + " " + bottomExtent + " " +
+      // arc to go up
+      "A" + arcRadius + " " + arcRadius + " 0 0 1 " +
+      (targetX - buffer - smallArcRadius) + " " + (bottomExtent - arcRadius) + " " +
+      // line up
+      "L" + (targetX - buffer - smallArcRadius) + " " + (targetY + smallArcRadius) + " " +
+      // arc to go right
+      "A" + smallArcRadius + " " + smallArcRadius + " 0 0 1 " +
+      (targetX - buffer) + " " + targetY + " " +
+      // line to node
+      "L" + targetX + " " + targetY;
   }
   
   return pathString;
