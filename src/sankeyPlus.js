@@ -187,16 +187,27 @@ function selectCircularLinkTypes(inputGraph, id) {
     }
   });
 
-  //correct self-linking links to be same direction as node
+  //correct self-linking links to be opposite direction from node's other circular links
   graph.links.forEach(function (link) {
     if (link.circular) {
       //if both source and target node are same type, then link should have same type
       if (link.source.circularLinkType == link.target.circularLinkType) {
         link.circularLinkType = link.source.circularLinkType;
       }
-      //if link is selflinking, then link should have same type as node
+      //if link is selflinking, then link should have opposite type from node's other circular links
       if (selfLinking(link, id)) {
-        link.circularLinkType = link.source.circularLinkType;
+        // Check if node has other circular links (not self-links)
+        var hasOtherCircularLinks = link.source.sourceLinks.some(function(l) {
+          return l.circular && !selfLinking(l, id);
+        }) || link.source.targetLinks.some(function(l) {
+          return l.circular && !selfLinking(l, id);
+        });
+        
+        if (hasOtherCircularLinks) {
+          // Put self-link on opposite side from other circular links
+          link.circularLinkType = link.source.circularLinkType === "top" ? "bottom" : "top";
+        }
+        // else keep the same type as assigned (for nodes with only self-links)
       }
     }
   });
