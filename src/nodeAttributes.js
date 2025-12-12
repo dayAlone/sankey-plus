@@ -50,3 +50,18 @@ export function numberOfNonSelfLinkingCycles(node, id) {
 
     return sourceCount + targetCount;
 }
+
+// Calculate total height needed for self-links of a node
+export function getSelfLinksHeight(node, id, baseRadius) {
+    var totalHeight = 0;
+    node.sourceLinks.forEach(function (l) {
+        if (l.circular && selfLinking(l, id)) {
+            totalHeight += l.width + 2; // link width plus small gap
+        }
+    });
+    // Add arc radius if there are self-links
+    if (totalHeight > 0) {
+        totalHeight += (baseRadius || 10) * 2;
+    }
+    return totalHeight;
+}

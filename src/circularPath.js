@@ -423,34 +423,38 @@ function createCircularPathString(link) {
   return pathString;
 }
 
-// create a compact self-link path (smooth loop to the right of the node)
+// create a compact self-link path (U-shaped loop below the node)
 function createSelfLinkPathString(link) {
   var sourceX = link.circularPathData.sourceX;
+  var targetX = link.circularPathData.targetX;
   var sourceY = link.circularPathData.sourceY;
   var targetY = link.circularPathData.targetY;
   
-  // Calculate the vertical radius (half the distance between source and target)
-  var verticalDistance = Math.abs(targetY - sourceY);
-  var verticalRadius = verticalDistance / 2;
+  // Get the bottom of the source node plus some offset
+  var nodeBottom = link.source.y1;
+  var arcRadius = link.circularPathData.arcRadius || (link.width / 2 + 10);
   
-  // Horizontal radius - how far the loop extends to the right
-  // Make it proportional to vertical distance but with a minimum
-  var horizontalRadius = Math.max(verticalRadius * 0.8, link.width + 10);
+  // The loop extends below the node into the reserved space
+  // Use the selfLinksHeight that was calculated during node positioning
+  var selfLinksHeight = link.source.selfLinksHeight || (arcRadius * 2 + link.width);
+  var loopBottom = nodeBottom + selfLinksHeight / 2;
   
-  // Center Y of the ellipse
-  var centerY = (sourceY + targetY) / 2;
+  // Horizontal distance for the loop
+  var halfWidth = Math.max((sourceX - targetX) / 2, arcRadius);
+  var centerX = (sourceX + targetX) / 2;
   
-  // Use a single elliptical arc for a smooth loop
-  // large-arc-flag = 1 means use the larger arc (more than 180 degrees)
-  // sweep-flag determines direction: 0 = counter-clockwise, 1 = clockwise
-  
+  // Path: from sourceY, curve down to loopBottom, then curve back up to targetY
   var pathString = 
-    // start at source
+    // start at source (right side of node)
     "M" + sourceX + " " + sourceY + " " +
-    // single elliptical arc to target
-    // A rx ry x-axis-rotation large-arc-flag sweep-flag x y
-    "A" + horizontalRadius + " " + verticalRadius + " 0 1 1 " +
-    sourceX + " " + targetY;
+    // curve down-right
+    "C" + sourceX + " " + (sourceY + arcRadius) + " " +
+    (sourceX + arcRadius) + " " + loopBottom + " " +
+    centerX + " " + loopBottom + " " +
+    // curve up-left  
+    "C" + (targetX - arcRadius) + " " + loopBottom + " " +
+    targetX + " " + (targetY + arcRadius) + " " +
+    targetX + " " + targetY;
   
   return pathString;
 }
