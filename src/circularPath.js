@@ -184,7 +184,11 @@ export function addCircularPathData(
     }
 
     if (link.circular) {
-      link.path = createCircularPathString(link);
+      if (selfLinking(link, id)) {
+        link.path = createSelfLinkPathString(link);
+      } else {
+        link.path = createCircularPathString(link);
+      }
     } else {
       var normalPath = linkHorizontal()
         .source(function (d) {
@@ -416,5 +420,60 @@ function createCircularPathString(link) {
       link.circularPathData.targetY;
   }
 
+  return pathString;
+}
+
+// create a compact self-link path (small loop to the right of the node)
+function createSelfLinkPathString(link) {
+  var sourceX = link.circularPathData.sourceX;
+  var sourceY = link.circularPathData.sourceY;
+  var targetY = link.circularPathData.targetY;
+  
+  // Calculate the loop size based on link width and the distance between source and target Y
+  var verticalDistance = Math.abs(targetY - sourceY);
+  var loopWidth = Math.max(link.width * 2, verticalDistance / 2, 20) + link.circularPathData.rightNodeBuffer;
+  var arcRadius = link.width / 2 + 5;
+  
+  // The loop extends to the right of the node
+  var rightExtent = sourceX + loopWidth;
+  
+  var pathString = "";
+  
+  if (link.circularLinkType == "top" || sourceY <= targetY) {
+    // Loop goes up and around (counterclockwise)
+    pathString =
+      // start at source
+      "M" + sourceX + " " + sourceY + " " +
+      // line right to start of arc
+      "L" + (sourceX + link.circularPathData.rightNodeBuffer) + " " + sourceY + " " +
+      // arc to go up
+      "A" + arcRadius + " " + arcRadius + " 0 0 0 " +
+      (sourceX + link.circularPathData.rightNodeBuffer + arcRadius) + " " + (sourceY - arcRadius) + " " +
+      // line up
+      "L" + (sourceX + link.circularPathData.rightNodeBuffer + arcRadius) + " " + (targetY + arcRadius) + " " +
+      // arc to go left
+      "A" + arcRadius + " " + arcRadius + " 0 0 0 " +
+      (sourceX + link.circularPathData.rightNodeBuffer) + " " + targetY + " " +
+      // line to target
+      "L" + sourceX + " " + targetY;
+  } else {
+    // Loop goes down and around (clockwise)
+    pathString =
+      // start at source
+      "M" + sourceX + " " + sourceY + " " +
+      // line right to start of arc
+      "L" + (sourceX + link.circularPathData.rightNodeBuffer) + " " + sourceY + " " +
+      // arc to go down
+      "A" + arcRadius + " " + arcRadius + " 0 0 1 " +
+      (sourceX + link.circularPathData.rightNodeBuffer + arcRadius) + " " + (sourceY + arcRadius) + " " +
+      // line down
+      "L" + (sourceX + link.circularPathData.rightNodeBuffer + arcRadius) + " " + (targetY - arcRadius) + " " +
+      // arc to go left
+      "A" + arcRadius + " " + arcRadius + " 0 0 1 " +
+      (sourceX + link.circularPathData.rightNodeBuffer) + " " + targetY + " " +
+      // line to target
+      "L" + sourceX + " " + targetY;
+  }
+  
   return pathString;
 }
