@@ -64,20 +64,26 @@ export function ascendingBreadth(a, b) {
     return link.target.column - link.source.column;
   }
 
+  function isSelfLink(link, id) {
+    return getNodeID(link.source, id) === getNodeID(link.target, id);
+  }
 
+  function typeIndex(link, typeOrder, typeAccessor) {
+    if (!typeOrder || !typeAccessor) return 0;
+    const t = typeAccessor(link);
+    const idx = typeOrder.indexOf(t);
+    return idx === -1 ? typeOrder.length : idx;
+  }
 
-  // Helper function to get effective Y position for sorting
-  // For circular links, use extreme values to push them to top/bottom
-  function getEffectiveTargetY(link, graphHeight) {
-    if (link.circular) {
-      if (link.circularLinkType === 'top') {
-        return -Infinity; // Push to very top
-      } else {
-        return Infinity; // Push to very bottom
-      }
-    }
-    // For normal links, use target node center
-    return (link.target.y0 + link.target.y1) / 2;
+  function typeCompare(link1, link2, typeOrder, typeAccessor) {
+    if (!typeOrder || !typeAccessor) return 0;
+    return typeIndex(link1, typeOrder, typeAccessor) - typeIndex(link2, typeOrder, typeAccessor);
+  }
+
+  function selfLinkWidthCompare(link1, link2, id) {
+    // Stabilize ordering of self-loop circular links so stacking is consistent.
+    if (!isSelfLink(link1, id) || !isSelfLink(link2, id)) return 0;
+    return (link2.width || 0) - (link1.width || 0);
   }
 
   // sort and set the links' y0 for each node
@@ -96,77 +102,105 @@ export function sortSourceLinks(inputGraph, id, typeOrder = null, typeAccessor =
 
     if (nodeSourceLinksLength > 1) {
       nodesSourceLinks.sort(function(link1, link2) {
-        // Get effective Y positions (handles circular links with Infinity/-Infinity)
-        var y1 = getEffectiveTargetY(link1, graph.y1);
-        var y2 = getEffectiveTargetY(link2, graph.y1);
-        
-        // Primary sort: by effective target Y position
-        if (y1 !== y2) {
-          return y1 - y2;
-        }
-        
-        // Both are circular with same type - sort by column distance
-        if (link1.circular && link2.circular) {
-          if (link1.circularLinkType === 'top') {
-            return link2.target.column - link1.target.column;
+        // If both are not circular...
+        if (!link1.circular && !link2.circular) {
+          // If the target nodes are the same column, then sort by the link's target y
+          if (link1.target.column == link2.target.column) {
+            const d = link1.y1 - link2.y1;
+            if (d !== 0) return d;
+          } else if (!sameInclines(link1, link2)) {
+            // If the links slope in different directions, then sort by the link's target y
+            const d = link1.y1 - link2.y1;
+            if (d !== 0) return d;
           } else {
-            return link1.target.column - link2.target.column;
+            // If the links slope in same directions, then sort by any overlap
+            if (link1.target.column > link2.target.column) {
+              var link2Adj = linkPerpendicularYToLinkTarget(link2, link1);
+              const d = link1.y1 - link2Adj;
+              if (d !== 0) return d;
+            }
+            if (link2.target.column > link1.target.column) {
+              var link1Adj = linkPerpendicularYToLinkTarget(link1, link2);
+              const d = link1Adj - link2.y1;
+              if (d !== 0) return d;
+            }
           }
+
+          // Tie-breaker: type grouping (soft; only if geometry ties)
+          const tc = typeCompare(link1, link2, typeOrder, typeAccessor);
+          if (tc !== 0) return tc;
+
+          return (link1.index || 0) - (link2.index || 0);
         }
-        
-        // Secondary: sort by type if typeOrder is provided
-        if (typeOrder && typeAccessor) {
-          var type1 = typeAccessor(link1);
-          var type2 = typeAccessor(link2);
-          var typeIndex1 = typeOrder.indexOf(type1);
-          var typeIndex2 = typeOrder.indexOf(type2);
-          if (typeIndex1 === -1) typeIndex1 = typeOrder.length;
-          if (typeIndex2 === -1) typeIndex2 = typeOrder.length;
-          if (typeIndex1 !== typeIndex2) {
-            return typeIndex1 - typeIndex2;
+
+        // If only one is circular, move top links up, or bottom links down
+        if (link1.circular && !link2.circular) {
+          return link1.circularLinkType == "top" ? -1 : 1;
+        } else if (link2.circular && !link1.circular) {
+          return link2.circularLinkType == "top" ? 1 : -1;
+        }
+
+        // If both links are circular...
+        if (link1.circular && link2.circular) {
+          // ...and they loop around different ways, move top up and bottom down
+          if (link1.circularLinkType !== link2.circularLinkType) {
+            return link1.circularLinkType == "top" ? -1 : 1;
           }
+
+          // Stable stacking for self-loop circular links
+          const sw = selfLinkWidthCompare(link1, link2, id);
+          if (sw !== 0) return sw;
+
+          if (link1.circularLinkType == "top") {
+            // both top
+            if (link1.target.column === link2.target.column) {
+              const d = link1.target.y1 - link2.target.y1;
+              if (d !== 0) return d;
+            } else {
+              const d = link2.target.column - link1.target.column;
+              if (d !== 0) return d;
+            }
+          } else {
+            // both bottom
+            if (link1.target.column === link2.target.column) {
+              const d = link2.target.y1 - link1.target.y1;
+              if (d !== 0) return d;
+            } else {
+              const d = link1.target.column - link2.target.column;
+              if (d !== 0) return d;
+            }
+          }
+
+          return (link1.index || 0) - (link2.index || 0);
         }
-        
-        // Tertiary: sort by link index for stability
-        return link1.index - link2.index;
+
+        return (link1.index || 0) - (link2.index || 0);
       });
     }
 
-    // Position non-circular links from top of node
+    // update y0 for links (pack from top)
     var ySourceOffset = node.y0;
     nodesSourceLinks.forEach(function(link) {
-      if (!link.circular || link.circularLinkType === 'top') {
-        link.y0 = ySourceOffset + link.width / 2;
-        ySourceOffset = ySourceOffset + link.width;
-      }
+      link.y0 = ySourceOffset + link.width / 2;
+      ySourceOffset = ySourceOffset + link.width;
     });
 
-    // Position bottom circular links from bottom of node
-    var yBottomOffset = node.y1;
-    for (var i = nodeSourceLinksLength - 1; i >= 0; i--) {
-      var link = nodesSourceLinks[i];
-      if (link.circular && link.circularLinkType === 'bottom') {
-        yBottomOffset = yBottomOffset - link.width;
-        link.y0 = yBottomOffset + link.width / 2;
+    // correct any circular bottom links so they are at the bottom of the node
+    nodesSourceLinks.forEach(function(link, i) {
+      if (link.circular && link.circularLinkType == "bottom") {
+        var j = i + 1;
+        var offsetFromBottom = 0;
+        for (j; j < nodeSourceLinksLength; j++) {
+          offsetFromBottom = offsetFromBottom + nodesSourceLinks[j].width;
+        }
+        link.y0 = node.y1 - offsetFromBottom - link.width / 2;
       }
-    }
+    });
   });
 
   return graph;
 }
 
-
-// Helper function to get effective Y position for sorting incoming links
-function getEffectiveSourceY(link) {
-  if (link.circular) {
-    if (link.circularLinkType === 'top') {
-      return -Infinity;
-    } else {
-      return Infinity;
-    }
-  }
-  return (link.source.y0 + link.source.y1) / 2;
-}
 
 // sort and set the links' y1 for each node
 export function sortTargetLinks(inputGraph, id, typeOrder = null, typeAccessor = null) {
@@ -178,60 +212,98 @@ export function sortTargetLinks(inputGraph, id, typeOrder = null, typeAccessor =
 
     if (nodesTargetLinksLength > 1) {
       nodesTargetLinks.sort(function(link1, link2) {
-        // Get effective Y positions
-        var y1 = getEffectiveSourceY(link1);
-        var y2 = getEffectiveSourceY(link2);
-        
-        // Primary sort: by effective source Y position
-        if (y1 !== y2) {
-          return y1 - y2;
-        }
-        
-        // Both are circular with same type - sort by column distance
-        if (link1.circular && link2.circular) {
-          if (link1.circularLinkType === 'top') {
-            return link1.source.column - link2.source.column;
+        // If both are not circular, base on the source y position
+        if (!link1.circular && !link2.circular) {
+          if (link1.source.column == link2.source.column) {
+            const d = link1.y0 - link2.y0;
+            if (d !== 0) return d;
+          } else if (!sameInclines(link1, link2)) {
+            const d = link1.y0 - link2.y0;
+            if (d !== 0) return d;
           } else {
-            return link2.source.column - link1.source.column;
+            // get the angle of the link to the further source node (ie the smaller column)
+            if (link2.source.column < link1.source.column) {
+              var link2Adj = linkPerpendicularYToLinkSource(link2, link1);
+              const d = link1.y0 - link2Adj;
+              if (d !== 0) return d;
+            }
+            if (link1.source.column < link2.source.column) {
+              var link1Adj = linkPerpendicularYToLinkSource(link1, link2);
+              const d = link1Adj - link2.y0;
+              if (d !== 0) return d;
+            }
           }
+
+          // Tie-breaker: type grouping (soft; only if geometry ties)
+          const tc = typeCompare(link1, link2, typeOrder, typeAccessor);
+          if (tc !== 0) return tc;
+
+          return (link1.index || 0) - (link2.index || 0);
         }
-        
-        // Secondary: sort by type if typeOrder is provided
-        if (typeOrder && typeAccessor) {
-          var type1 = typeAccessor(link1);
-          var type2 = typeAccessor(link2);
-          var typeIndex1 = typeOrder.indexOf(type1);
-          var typeIndex2 = typeOrder.indexOf(type2);
-          if (typeIndex1 === -1) typeIndex1 = typeOrder.length;
-          if (typeIndex2 === -1) typeIndex2 = typeOrder.length;
-          if (typeIndex1 !== typeIndex2) {
-            return typeIndex1 - typeIndex2;
+
+        // If only one is circular, move top links up, or bottom links down
+        if (link1.circular && !link2.circular) {
+          return link1.circularLinkType == "top" ? -1 : 1;
+        } else if (link2.circular && !link1.circular) {
+          return link2.circularLinkType == "top" ? 1 : -1;
+        }
+
+        // If both links are circular...
+        if (link1.circular && link2.circular) {
+          // ...and they loop around different ways, move top up and bottom down
+          if (link1.circularLinkType !== link2.circularLinkType) {
+            return link1.circularLinkType == "top" ? -1 : 1;
           }
+
+          // Stable stacking for self-loop circular links
+          const sw = selfLinkWidthCompare(link1, link2, id);
+          if (sw !== 0) return sw;
+
+          if (link1.circularLinkType == "top") {
+            // both top
+            if (link1.source.column === link2.source.column) {
+              const d = link1.source.y1 - link2.source.y1;
+              if (d !== 0) return d;
+            } else {
+              const d = link1.source.column - link2.source.column;
+              if (d !== 0) return d;
+            }
+          } else {
+            // both bottom
+            if (link1.source.column === link2.source.column) {
+              const d = link1.source.y1 - link2.source.y1;
+              if (d !== 0) return d;
+            } else {
+              const d = link2.source.column - link1.source.column;
+              if (d !== 0) return d;
+            }
+          }
+
+          return (link1.index || 0) - (link2.index || 0);
         }
-        
-        // Tertiary: sort by link index for stability
-        return link1.index - link2.index;
+
+        return (link1.index || 0) - (link2.index || 0);
       });
     }
 
-    // Position non-circular and top circular links from top of node
+    // update y1 for links (pack from top)
     var yTargetOffset = node.y0;
     nodesTargetLinks.forEach(function(link) {
-      if (!link.circular || link.circularLinkType === 'top') {
-        link.y1 = yTargetOffset + link.width / 2;
-        yTargetOffset = yTargetOffset + link.width;
-      }
+      link.y1 = yTargetOffset + link.width / 2;
+      yTargetOffset = yTargetOffset + link.width;
     });
 
-    // Position bottom circular links from bottom of node
-    var yBottomOffset = node.y1;
-    for (var i = nodesTargetLinksLength - 1; i >= 0; i--) {
-      var link = nodesTargetLinks[i];
-      if (link.circular && link.circularLinkType === 'bottom') {
-        yBottomOffset = yBottomOffset - link.width;
-        link.y1 = yBottomOffset + link.width / 2;
+    // correct any circular bottom links so they are at the bottom of the node
+    nodesTargetLinks.forEach(function(link, i) {
+      if (link.circular && link.circularLinkType == "bottom") {
+        var j = i + 1;
+        var offsetFromBottom = 0;
+        for (j; j < nodesTargetLinksLength; j++) {
+          offsetFromBottom = offsetFromBottom + nodesTargetLinks[j].width;
+        }
+        link.y1 = node.y1 - offsetFromBottom - link.width / 2;
       }
-    }
+    });
   });
 
   return graph;
