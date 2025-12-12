@@ -118,6 +118,7 @@ export function sortSourceLinks(inputGraph, id, typeOrder = null, typeAccessor =
 
   let graph = inputGraph;
   const replacedByIndex = buildReplacedLinkIndex(graph);
+  const hasVirtualizedLinks = replacedByIndex.size > 0;
 
   graph.nodes.forEach(function(node) {
     // move any nodes up which are off the bottom
@@ -132,17 +133,18 @@ export function sortSourceLinks(inputGraph, id, typeOrder = null, typeAccessor =
       nodesSourceLinks.sort(function(link1, link2) {
         // If we're on a real node and virtual routes are enabled, prefer sorting virtual links
         // by their *ultimate* target node (parentLink.target), to avoid crossings at the real node.
-        const tNode1 = (!node.virtual && link1.linkType === "virtual")
+        const tNode1 = (!node.virtual && hasVirtualizedLinks)
           ? effectiveTargetNode(link1, replacedByIndex)
           : link1.target;
-        const tNode2 = (!node.virtual && link2.linkType === "virtual")
+        const tNode2 = (!node.virtual && hasVirtualizedLinks)
           ? effectiveTargetNode(link2, replacedByIndex)
           : link2.target;
 
         // If both are not circular...
         if (!link1.circular && !link2.circular) {
-          // For virtual links from real nodes: barycentric ordering by ultimate target center
-          if (!node.virtual && (link1.linkType === "virtual" || link2.linkType === "virtual")) {
+          // With virtual routes enabled, always prefer barycentric ordering by ultimate target center
+          // at real nodes (this reduces crossings that come from intermediate virtual hops).
+          if (!node.virtual && hasVirtualizedLinks) {
             const c1 = (tNode1.y0 + tNode1.y1) / 2;
             const c2 = (tNode2.y0 + tNode2.y1) / 2;
             const d = c1 - c2;
@@ -251,6 +253,7 @@ export function sortSourceLinks(inputGraph, id, typeOrder = null, typeAccessor =
 export function sortTargetLinks(inputGraph, id, typeOrder = null, typeAccessor = null) {
   let graph = inputGraph;
   const replacedByIndex = buildReplacedLinkIndex(graph);
+  const hasVirtualizedLinks = replacedByIndex.size > 0;
 
   graph.nodes.forEach(function(node) {
     var nodesTargetLinks = node.targetLinks;
@@ -260,17 +263,18 @@ export function sortTargetLinks(inputGraph, id, typeOrder = null, typeAccessor =
       nodesTargetLinks.sort(function(link1, link2) {
         // For incoming links on a real node with virtual routes: sort virtual links
         // by their *ultimate* source node (parentLink.source), to avoid crossings at the real node.
-        const sNode1 = (!node.virtual && link1.linkType === "virtual")
+        const sNode1 = (!node.virtual && hasVirtualizedLinks)
           ? effectiveSourceNode(link1, replacedByIndex)
           : link1.source;
-        const sNode2 = (!node.virtual && link2.linkType === "virtual")
+        const sNode2 = (!node.virtual && hasVirtualizedLinks)
           ? effectiveSourceNode(link2, replacedByIndex)
           : link2.source;
 
         // If both are not circular, base on the source y position
         if (!link1.circular && !link2.circular) {
-          // For virtual links into real nodes: barycentric ordering by ultimate source center
-          if (!node.virtual && (link1.linkType === "virtual" || link2.linkType === "virtual")) {
+          // With virtual routes enabled, always prefer barycentric ordering by ultimate source center
+          // at real nodes (this reduces crossings that come from intermediate virtual hops).
+          if (!node.virtual && hasVirtualizedLinks) {
             const c1 = (sNode1.y0 + sNode1.y1) / 2;
             const c2 = (sNode2.y0 + sNode2.y1) / 2;
             const d = c1 - c2;
