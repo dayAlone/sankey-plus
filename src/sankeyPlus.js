@@ -799,11 +799,13 @@ function fillHeight(inputGraph) {
     var chartHeight = graph.y1 - graph.y0;
     var ratio = chartHeight / currentHeight;
 
-    let moveScale = scaleLinear()
-      .domain([minY0, maxY1])
-      .range([graph.y0, graph.y1]);
-
+    // Only scale down if nodes are too tall, don't stretch if they're too short
+    // This prevents creating huge gaps when scale is small
     if (ratio < 1) {
+      let moveScale = scaleLinear()
+        .domain([minY0, maxY1])
+        .range([graph.y0, graph.y1]);
+
       nodes.forEach(function (node) {
         node.y0 = moveScale(node.y0);
         node.y1 = moveScale(node.y1);
@@ -814,20 +816,9 @@ function fillHeight(inputGraph) {
         link.y1 = moveScale(link.y1);
         link.width = link.width * ratio;
       });
-    } else {
-      nodes.forEach(function (node) {
-        var nodeHeight = node.y1 - node.y0;
-        let dy = moveScale(node.y0) - node.y0;
-        node.y0 = moveScale(node.y0);
-        node.y1 = node.y0 + nodeHeight;
-        node.sourceLinks.forEach(function (link) {
-          link.y0 = link.y0 + dy;
-        });
-        node.targetLinks.forEach(function (link) {
-          link.y1 = link.y1 + dy;
-        });
-      });
     }
+    // If ratio >= 1, nodes fit fine - don't stretch them to fill entire height
+    // This prevents creating huge gaps between nodes
   }
 
   return graph;
