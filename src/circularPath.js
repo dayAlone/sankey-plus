@@ -430,34 +430,37 @@ function checkIfLinkShouldBypass(link, graph, id) {
   // Get source and target positions
   var sourceY = link.y0;
   var targetY = link.y1;
-  var sourceX = link.source.x1;
-  var targetX = link.target.x0;
   
-  // Only consider forward links that span multiple columns
-  var columnSpan = link.target.column - link.source.column;
-  if (columnSpan <= 1) return false;
-  
-  // Check vertical distance
+  // Check vertical distance - the main criterion
   var verticalDistance = Math.abs(targetY - sourceY);
   
-  // Count how many nodes this link would cross
-  var nodesCrossed = 0;
+  // Get node heights to compare
+  var sourceNodeHeight = link.source.y1 - link.source.y0;
+  var targetNodeHeight = link.target.y1 - link.target.y0;
+  var avgNodeHeight = (sourceNodeHeight + targetNodeHeight) / 2;
+  
+  // Bypass if vertical distance is more than 1.5x the average node height
+  // This means the link would cross significant vertical space
+  if (verticalDistance > avgNodeHeight * 1.5) {
+    return true;
+  }
+  
+  // Also check if there are nodes in between that would be crossed
   var minY = Math.min(sourceY, targetY);
   var maxY = Math.max(sourceY, targetY);
   
+  var nodesCrossed = 0;
   graph.nodes.forEach(function(node) {
-    // Check if node is between source and target columns
+    // Check if node is in a column between source and target
     if (node.column > link.source.column && node.column < link.target.column) {
-      // Check if node is in the vertical path of the link
-      var nodeCenter = (node.y0 + node.y1) / 2;
-      if (nodeCenter > minY && nodeCenter < maxY) {
+      // Check if any part of the node is in the vertical range of the link
+      if (node.y1 > minY && node.y0 < maxY) {
         nodesCrossed++;
       }
     }
   });
   
-  // Bypass if crossing more than 1 node and vertical distance is significant
-  return nodesCrossed >= 1 && verticalDistance > 50;
+  return nodesCrossed > 0;
 }
 
 // Create a bypass path that goes above the nodes
