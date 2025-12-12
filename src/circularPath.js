@@ -60,36 +60,32 @@ export function addCircularPathData(
 
       // for self linking paths - always use compact layout close to the node
       if (selfLinking(link, id)) {
-        link.circularPathData.rightSmallArcRadius = baseRadius + link.width / 2;
-        link.circularPathData.rightLargeArcRadius = baseRadius + link.width / 2;
-        link.circularPathData.leftSmallArcRadius = baseRadius + link.width / 2;
-        link.circularPathData.leftLargeArcRadius = baseRadius + link.width / 2;
+        var selfLinkRadius = baseRadius + link.width / 2;
+        link.circularPathData.rightSmallArcRadius = selfLinkRadius;
+        link.circularPathData.rightLargeArcRadius = selfLinkRadius;
+        link.circularPathData.leftSmallArcRadius = selfLinkRadius;
+        link.circularPathData.leftLargeArcRadius = selfLinkRadius;
+
+        // Minimal margin for self-links - just enough for the arc
+        var selfLinkMargin = selfLinkRadius + link.width / 2;
 
         if (link.circularLinkType == "bottom") {
           link.circularPathData.verticalFullExtent =
-            link.source.y1 +
-            verticalMargin +
-            link.circularPathData.verticalBuffer;
+            link.source.y1 + selfLinkMargin;
           link.circularPathData.verticalRightInnerExtent =
-            link.circularPathData.verticalFullExtent -
-            link.circularPathData.rightLargeArcRadius;
+            link.circularPathData.verticalFullExtent - selfLinkRadius;
           link.circularPathData.verticalLeftInnerExtent =
-            link.circularPathData.verticalFullExtent -
-            link.circularPathData.leftLargeArcRadius;
+            link.circularPathData.verticalFullExtent - selfLinkRadius;
         } else {
           // top links
           link.circularPathData.verticalFullExtent =
-            link.source.y0 -
-            verticalMargin -
-            link.circularPathData.verticalBuffer;
+            link.source.y0 - selfLinkMargin;
           link.circularPathData.verticalRightInnerExtent =
-            link.circularPathData.verticalFullExtent +
-            link.circularPathData.rightLargeArcRadius;
+            link.circularPathData.verticalFullExtent + selfLinkRadius;
           link.circularPathData.verticalLeftInnerExtent =
-            link.circularPathData.verticalFullExtent +
-            link.circularPathData.leftLargeArcRadius;
+            link.circularPathData.verticalFullExtent + selfLinkRadius;
         }
-      } else if (!selfLinking(link, id)) {
+      } else {
         // else calculate normally
         // add right extent coordinates, based on links with same source column and circularLink type
         var thisColumn = link.source.column;
@@ -210,12 +206,14 @@ function calcVerticalBuffer(links, id, circularLinkGap) {
   links.forEach(function (link, i) {
     var buffer = 0;
 
-    if (selfLinking(link, id) && onlyCircularLink(link)) {
+    // Self-links always get minimal buffer - they stay close to their node
+    if (selfLinking(link, id)) {
       link.circularPathData.verticalBuffer = buffer + link.width / 2;
     } else {
       var j = 0;
       for (j; j < i; j++) {
-        if (circularLinksCross(links[i], links[j])) {
+        // Don't consider self-links when calculating buffer for other links
+        if (!selfLinking(links[j], id) && circularLinksCross(links[i], links[j])) {
           var bufferOverThisLink =
             links[j].circularPathData.verticalBuffer +
             links[j].width / 2 +
