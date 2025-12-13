@@ -1296,25 +1296,28 @@ class SankeyChart {
       .on("mouseenter", function(event, d) {
         const dimOpacity = 0.1;
         
-        // Find all links connected to this node
-        const connectedLinks = graphLinks.filter(link => 
-          link.source === d || link.target === d
-        );
+        // Find all links connected to this node (using Set for faster lookup)
+        const connectedLinksSet = new Set();
+        graphLinks.forEach(link => {
+          if (link.source === d || link.target === d) {
+            connectedLinksSet.add(link);
+          }
+        });
         
         // Find all connected nodes
         const connectedNodes = new Set([d]);
-        connectedLinks.forEach(link => {
+        connectedLinksSet.forEach(link => {
           connectedNodes.add(link.source);
           connectedNodes.add(link.target);
         });
         
-        // Dim all links
+        // Dim all links, highlight connected ones
         g.selectAll(".sankey-link")
-          .style("stroke-opacity", link => 
-            connectedLinks.includes(link) ? 1 : dimOpacity
+          .style("stroke-opacity", linkData => 
+            connectedLinksSet.has(linkData) ? 1 : dimOpacity
           );
         
-        // Dim all nodes
+        // Dim all nodes, highlight connected ones
         g.selectAll(".nodes g rect")
           .style("opacity", nodeData => 
             connectedNodes.has(nodeData) ? nodeOpacity : dimOpacity
