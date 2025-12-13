@@ -1480,7 +1480,7 @@ class SankeyChart {
           typeName = "\nType: " + linkTypes[linkType].name;
         }
       }
-      return d.source.name + " -> " + d.target.name + "\n" + d.value + typeName;
+      return d.source.name + " -> " + d.target.name + "\nValue: " + d.value + "%" + typeName;
     });
 
     svg
