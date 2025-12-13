@@ -550,39 +550,47 @@ function computeNodeBreadths() {
 
         // if the node has a circular link
         else if (node.partOfCycle) {
-          // if the node has no self links
+          let totalNodesHeight = totalColumnValue * graph.ky;
+          let gapPerNode = nodesLength > 1 ? Math.min(nodePadding, (graph.y1 - graph.y0 - totalNodesHeight) / (nodesLength - 1)) : 0;
+          if (gapPerNode < 0) gapPerNode = 0;
+          
+          let topCyclesBefore = 0, bottomCyclesBefore = 0;
+          for (let j = 0; j < i; j++) {
+            if (nodes[j].partOfCycle && nodes[j].circularLinkType == "top") topCyclesBefore++;
+            if (nodes[j].partOfCycle && nodes[j].circularLinkType == "bottom") bottomCyclesBefore++;
+          }
+          
           if (numberOfNonSelfLinkingCycles(node, id) == 0) {
-            node.y0 = graph.y1 / 2 + i;
+            node.y0 = graph.y0 + (graph.y1 - graph.y0) / 2 + i * (node.value * graph.ky + gapPerNode);
             node.y1 = node.y0 + node.value * graph.ky;
           } else if (node.circularLinkType == "top") {
-            node.y0 = graph.y0 + i + cycleInset;
+            node.y0 = graph.y0 + topCyclesBefore * (node.value * graph.ky + gapPerNode) + cycleInset;
             node.y1 = node.y0 + node.value * graph.ky;
           } else {
-            node.y0 = graph.y1 - node.value * graph.ky - i - cycleInset;
+            let maxNonCycleY1 = graph.y0;
+            nodes.forEach(function(n) {
+              if (!n.partOfCycle && n.y1 !== undefined && n.y1 > maxNonCycleY1) maxNonCycleY1 = n.y1;
+            });
+            if (maxNonCycleY1 === graph.y0) maxNonCycleY1 = graph.y0 + totalNodesHeight + (nodesLength - 1) * gapPerNode;
+            node.y0 = maxNonCycleY1 + gapPerNode + bottomCyclesBefore * (node.value * graph.ky + gapPerNode) + cycleInset;
             node.y1 = node.y0 + node.value * graph.ky;
           }
         } else {
-          // For non-cycle nodes, distribute them more evenly
-          // Calculate total height needed for nodes
           let totalNodesHeight = totalColumnValue * graph.ky;
           let availableHeight = graph.y1 - graph.y0;
           let totalGap = availableHeight - totalNodesHeight;
           
-          // Cap gap to prevent huge spaces
-          let maxGapPerNode = nodePadding * 2;
-          let maxTotalGap = maxGapPerNode * (nodesLength - 1);
-          if (totalGap > maxTotalGap) {
-            totalGap = maxTotalGap;
-          }
-          if (totalGap < 0) {
-            totalGap = 0;
-          }
+          let maxGapPerNode = nodePadding;
+          if (totalGap > maxGapPerNode * (nodesLength - 1)) totalGap = maxGapPerNode * (nodesLength - 1);
+          if (totalGap < 0) totalGap = 0;
           
-          // Distribute nodes evenly with capped gaps
           let gapPerNode = nodesLength > 1 ? totalGap / (nodesLength - 1) : 0;
           let startY = graph.y0 + (availableHeight - totalNodesHeight - totalGap) / 2;
           
-          node.y0 = startY + i * (node.value * graph.ky + gapPerNode);
+          let accumulatedHeight = 0;
+          for (let j = 0; j < i; j++) accumulatedHeight += nodes[j].value * graph.ky + gapPerNode;
+          
+          node.y0 = startY + accumulatedHeight;
           node.y1 = node.y0 + node.value * graph.ky;
         }
       }, this);

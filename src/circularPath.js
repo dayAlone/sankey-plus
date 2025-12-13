@@ -139,11 +139,15 @@ export function addCircularPathData(
           radiusOffset = radiusOffset + l.width;
         });
 
-        // Find min/max Y of nodes between source and target columns (inclusive)
+        // Find min/max Y of REAL nodes between source and target columns
+        // Exclude virtual nodes
         var relevantMinY = Math.min(link.source.y0, link.target.y0);
         var relevantMaxY = Math.max(link.source.y1, link.target.y1);
         
         graph.nodes.forEach(function(node) {
+          if (node.virtual || (node.name && node.name.indexOf('virtualNode') === 0)) {
+            return;
+          }
           if (node.column >= Math.min(link.source.column, link.target.column) && 
               node.column <= Math.max(link.source.column, link.target.column)) {
             if (node.y0 < relevantMinY) relevantMinY = node.y0;
@@ -151,12 +155,16 @@ export function addCircularPathData(
           }
         });
 
+        // Limit base offset based on column height
+        var columnHeight = relevantMaxY - relevantMinY;
+        var maxBaseOffset = Math.max(verticalMargin + link.width + 10, columnHeight * 0.25);
+        var baseOffset = Math.min(verticalMargin, maxBaseOffset);
+        var totalOffset = baseOffset + link.circularPathData.verticalBuffer;
+
         // bottom links
         if (link.circularLinkType == "bottom") {
           link.circularPathData.verticalFullExtent =
-            relevantMaxY +
-            verticalMargin +
-            link.circularPathData.verticalBuffer;
+            relevantMaxY + totalOffset;
           link.circularPathData.verticalRightInnerExtent =
             link.circularPathData.verticalFullExtent -
             link.circularPathData.rightLargeArcRadius;
@@ -166,7 +174,7 @@ export function addCircularPathData(
         } else {
           // top links
           link.circularPathData.verticalFullExtent =
-            relevantMinY - verticalMargin - link.circularPathData.verticalBuffer;
+            relevantMinY - totalOffset;
           link.circularPathData.verticalRightInnerExtent =
             link.circularPathData.verticalFullExtent +
             link.circularPathData.rightLargeArcRadius;
@@ -215,21 +223,24 @@ export function addCircularPathData(
 // creates vertical buffer values per set of top/bottom links
 function calcVerticalBuffer(links, id, circularLinkGap) {
   links.sort(sortLinkColumnAscending);
+  
   links.forEach(function (link, i) {
     var buffer = 0;
 
-    // Self-links always get minimal buffer - they stay close to their node
     if (selfLinking(link, id)) {
       link.circularPathData.verticalBuffer = buffer + link.width / 2;
     } else {
-      var j = 0;
-      for (j; j < i; j++) {
-        // Don't consider self-links when calculating buffer for other links
-        if (!selfLinking(links[j], id) && circularLinksCross(links[i], links[j])) {
+      for (var j = 0; j < i; j++) {
+        if (!selfLinking(links[j], id) && circularLinksActuallyCross(links[i], links[j])) {
+          // Smaller gap for links to same target
+          var sameTarget = (links[i].target.name || links[i].target.index) === 
+                           (links[j].target.name || links[j].target.index);
+          var gap = sameTarget ? Math.max(1, circularLinkGap / 2) : circularLinkGap;
+          
           var bufferOverThisLink =
             links[j].circularPathData.verticalBuffer +
             links[j].width / 2 +
-            circularLinkGap;
+            gap;
           buffer = bufferOverThisLink > buffer ? bufferOverThisLink : buffer;
         }
       }
@@ -241,15 +252,42 @@ function calcVerticalBuffer(links, id, circularLinkGap) {
   return links;
 }
 
-// Check if two circular links potentially overlap
-function circularLinksCross(link1, link2) {
-  if (link1.source.column < link2.target.column) {
-    return false;
-  } else if (link1.target.column > link2.source.column) {
-    return false;
-  } else {
-    return true;
-  }
+// Links cross ONLY if they share a vertical segment column
+// Vertical segments are at source column (right) and target column (left)
+function circularLinksActuallyCross(link1, link2) {
+  // Links only need to stack if their vertical segments are in the same column
+  // OR if one link's horizontal segment crosses another's vertical segment
+  
+  var link1Source = link1.source.column;
+  var link1Target = link1.target.column;
+  var link2Source = link2.source.column;
+  var link2Target = link2.target.column;
+  
+  // Same source column = right vertical segments overlap
+  if (link1Source === link2Source) return true;
+  
+  // Same target column = left vertical segments overlap  
+  if (link1Target === link2Target) return true;
+  
+  // Link1's source = Link2's target or vice versa = segments touch
+  if (link1Source === link2Target || link1Target === link2Source) return true;
+  
+  // Check if horizontal segment of one crosses vertical segment of another
+  var link1Left = Math.min(link1Source, link1Target);
+  var link1Right = Math.max(link1Source, link1Target);
+  var link2Left = Math.min(link2Source, link2Target);
+  var link2Right = Math.max(link2Source, link2Target);
+  
+  // Link2's source is inside link1's horizontal range
+  if (link2Source > link1Left && link2Source < link1Right) return true;
+  // Link2's target is inside link1's horizontal range
+  if (link2Target > link1Left && link2Target < link1Right) return true;
+  // Link1's source is inside link2's horizontal range
+  if (link1Source > link2Left && link1Source < link2Right) return true;
+  // Link1's target is inside link2's horizontal range
+  if (link1Target > link2Left && link1Target < link2Right) return true;
+  
+  return false;
 }
 
 // create a d path using the addCircularPathData
