@@ -44,46 +44,19 @@ export function linkXLength(link) {
     return link.target.x0 - link.source.x1;
 }
 
-// Return the Y coordinate on the longerLink path * which is perpendicular shorterLink's source.
-// * approx, based on a straight line from target to source, when in fact the path is a bezier
+// Return the Y coordinate on the longerLink path at shorterLink's target X position.
+// Used for sorting source links - both links share the same source node.
+// We project longerLink to find where it would be at shorterLink's target X.
 export function linkPerpendicularYToLinkTarget(longerLink, shorterLink) {
-    // get the angle for the longer link
-    var angle = linkAngle(longerLink);
-
-    // get the adjacent length to the other link's x position
-    var heightFromY1ToPependicular = linkXLength(shorterLink) / Math.tan(angle);
-
-    // add or subtract from longer link's original y1, depending on the slope
-    var yPerpendicular =
-        incline(longerLink) == 'up'
-            ? longerLink.y1 - heightFromY1ToPependicular
-            : longerLink.y1 + heightFromY1ToPependicular;
-
-    return yPerpendicular;
+    var ratio = linkXLength(shorterLink) / linkXLength(longerLink);
+    return longerLink.y0 + (longerLink.y1 - longerLink.y0) * ratio;
 }
 
-// Return the Y coordinate on the longerLink path * which is perpendicular shorterLink's source.
-// * approx, based on a straight line from target to source, when in fact the path is a bezier
+// Return the Y coordinate on the longerLink path at shorterLink's source X position.
+// Used for sorting target links - both links share the same target node.
+// We project longerLink to find where it would be at shorterLink's source X.
 export function linkPerpendicularYToLinkSource(longerLink, shorterLink) {
-    // get the angle for the longer link
-    var angle = linkAngle(longerLink);
-
-    // get the adjacent length to the other link's x position
-    var heightFromY1ToPependicular = linkXLength(shorterLink) / Math.tan(angle);
-
-    // add or subtract from longer link1's original y1, depending on the slope
-    var yPerpendicular =
-        incline(longerLink) == 'up'
-            ? longerLink.y1 + heightFromY1ToPependicular
-            : longerLink.y1 - heightFromY1ToPependicular;
-
-    return yPerpendicular;
-}
-
-// Return the angle between a straight line between the source and target of the link, and the vertical plane of the node
-function linkAngle(link) {
-    var adjacent = Math.abs(link.y1 - link.y0);
-    var opposite = Math.abs(link.target.x0 - link.source.x1);
-
-    return Math.atan(opposite / adjacent);
+    // Distance from longerLink's source to shorterLink's source, as a ratio of longerLink's length
+    var ratio = (linkXLength(longerLink) - linkXLength(shorterLink)) / linkXLength(longerLink);
+    return longerLink.y0 + (longerLink.y1 - longerLink.y0) * ratio;
 }

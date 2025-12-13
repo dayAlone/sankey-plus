@@ -799,9 +799,13 @@ function straigtenVirtualNodes(inputGraph) {
 
       //if the node is linked to another virtual node, get the difference in y
       //select the node which precedes it first, else get the node after it
+      //If next node is real target, align to it so links sort correctly
       if (node.targetLinks[0].source.virtual) {
         dy = node.targetLinks[0].source.y0 - node.y0;
       } else if (node.sourceLinks[0].target.virtual) {
+        dy = node.sourceLinks[0].target.y0 - node.y0;
+      } else {
+        // Last virtual node before real target - align to real target
         dy = node.sourceLinks[0].target.y0 - node.y0;
       }
 
@@ -885,21 +889,49 @@ function addVirtualPathData(inputGraph, virtualLinkType) {
   graph.replacedLinks.forEach(function (replacedLink) {
     replacedLink.useVirtual = virtualLinkType == "virtual" ? true : false;
 
-    let firstPath = true;
-
+    // Find the first virtual link (starts from replacedLink.source) and last (ends at replacedLink.target)
+    let foundFirst = false;
+    let foundLast = false;
+    
     for (let i = 0; i < graph.links.length; i++) {
       if (graph.links[i].parentLink == replacedLink.index) {
-        if (firstPath) {
-          replacedLink.y0 = graph.links[i].y0;
-          replacedLink.x0 = graph.links[i].source.x1;
-          replacedLink.width = graph.links[i].width;
-          firstPath = false;
-        } else {
+        // First link in chain: source matches AND target is virtual node belonging to this replacedLink
+        var link = graph.links[i];
+        var isFirst = link.source.index === replacedLink.source.index && 
+                      link.target.virtual && link.target.replacedLink === replacedLink.index;
+        if (isFirst) {
+          replacedLink.y0 = link.y0;
+          replacedLink.x0 = link.source.x1;
+          replacedLink.width = link.width;
+          foundFirst = true;
+        }
+        // Last link in chain: target matches replacedLink.target (compare by index)
+        if (graph.links[i].target.index === replacedLink.target.index) {
           replacedLink.y1 = graph.links[i].y1;
           replacedLink.x1 = graph.links[i].target.x0;
+          foundLast = true;
         }
       }
     }
+    
+    // Fallback to old logic if source/target matching didn't work
+    if (!foundFirst || !foundLast) {
+      let firstPath = true;
+      for (let i = 0; i < graph.links.length; i++) {
+        if (graph.links[i].parentLink == replacedLink.index) {
+          if (firstPath && !foundFirst) {
+            replacedLink.y0 = graph.links[i].y0;
+            replacedLink.x0 = graph.links[i].source.x1;
+            replacedLink.width = graph.links[i].width;
+            firstPath = false;
+          } else if (!foundLast) {
+            replacedLink.y1 = graph.links[i].y1;
+            replacedLink.x1 = graph.links[i].target.x0;
+          }
+        }
+      }
+    }
+    
 
     if (virtualLinkType == "both") {
       let columnToTest = replacedLink.source.column + 1;

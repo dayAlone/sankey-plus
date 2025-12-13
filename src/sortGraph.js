@@ -23,13 +23,65 @@ export function sortLinkTargetYDescending(link1, link2) {
 }
 
 // sort links' breadth (ie top to bottom in a column), based on their source nodes' breadths
+// For links coming from different columns, use slope-based comparison to minimize crossings
 export function ascendingSourceBreadth(a, b) {
-    return ascendingBreadth(a.source, b.source) || a.index - b.index;
+    // If both links come from different columns, compare by slope
+    if (a.source.column !== b.source.column && !a.circular && !b.circular) {
+        var targetCol = a.target.column;
+        var targetY = (a.target.y0 + a.target.y1) / 2;
+        
+        // Calculate source Y centers
+        var aSourceY = (a.source.y0 + a.source.y1) / 2;
+        var bSourceY = (b.source.y0 + b.source.y1) / 2;
+        
+        // Calculate slopes (vertical change per column traveled)
+        var aSlope = (targetY - aSourceY) / (targetCol - a.source.column);
+        var bSlope = (targetY - bSourceY) / (targetCol - b.source.column);
+        
+        // Sort by slope: links with smaller slope should be on top
+        return aSlope - bSlope;
+    }
+    // For links from the same column, sort by source y0 ASCENDING  
+    // Links coming from upper nodes enter at top, links from lower nodes enter at bottom
+    return a.source.y0 - b.source.y0 || a.index - b.index;
+}
+
+// Helper to get the "final" target y0 - for virtual links, use the real target node
+function getFinalTargetY0(link) {
+    // If target is virtual, find the real final target via replacedLink reference
+    if (link.target.virtual && link.target.replacedLink !== undefined) {
+        // The replacedLink is stored as parentLink on the link itself
+        // But we need to look at the virtual node's replacedLink to find the actual target
+        // For now, just use the immediate target since we can't easily traverse
+        return link.target.y0;
+    }
+    return link.target.y0;
 }
 
 // sort links' breadth (ie top to bottom in a column), based on their target nodes' breadths
+// For links going to different columns, use slope-based comparison to minimize crossings
 export function ascendingTargetBreadth(a, b) {
-    return ascendingBreadth(a.target, b.target) || a.index - b.index;
+    // If both links go to different columns, compare by slope (vertical change per column)
+    // This determines which link should exit from top to minimize Bezier curve crossings
+    if (a.target.column !== b.target.column && !a.circular && !b.circular) {
+        var sourceCol = a.source.column;
+        var sourceY = (a.source.y0 + a.source.y1) / 2;
+        
+        // Calculate target Y centers
+        var aTargetY = (a.target.y0 + a.target.y1) / 2;
+        var bTargetY = (b.target.y0 + b.target.y1) / 2;
+        
+        // Calculate slopes (vertical change per column traveled)
+        var aSlope = (aTargetY - sourceY) / (a.target.column - sourceCol);
+        var bSlope = (bTargetY - sourceY) / (b.target.column - sourceCol);
+        
+        // Sort by slope: links with smaller slope (going more upward/horizontal) should be on top
+        return aSlope - bSlope;
+    }
+    // For links in the same column, sort by target y0 ASCENDING
+    // Links going to upper nodes exit from top, links going to lower nodes exit from bottom
+    // This minimizes visual crossings
+    return getFinalTargetY0(a) - getFinalTargetY0(b) || a.index - b.index;
 }
 
 // sort nodes' breadth (ie top to bottom in a column)
@@ -119,26 +171,95 @@ export function sortSourceLinks(inputGraph, id) {
       nodesSourceLinks.sort(function(link1, link2) {
         // if both are not circular...
         if (!link1.circular && !link2.circular) {
-          // if the target nodes are the same column, then sort by the link's target y
-          if (link1.target.column == link2.target.column) {
-            return link1.y1 - link2.y1;
-          } else if (!sameInclines(link1, link2)) {
-            // if the links slope in different directions, then sort by the link's target y
-            return link1.y1 - link2.y1;
-
-            // if the links slope in same directions, then sort by any overlap
+          // Get the final target Y for each link
+          // For virtual links, use the real target from replacedLinks
+          var link1TargetY;
+          var link2TargetY;
+          
+          // For virtual links, find the final target node in graph.nodes and use its y position
+          // Note: replacedLinks contains clones, so we need to find the actual node by name
+          if (link1.target.virtual && link1.target.replacedLink !== undefined && graph.replacedLinks) {
+            var replacedLink1 = graph.replacedLinks.find(function(rl) { return rl.index === link1.target.replacedLink; });
+            if (replacedLink1 && replacedLink1.target) {
+              // Find the actual node in graph.nodes by name (clones don't have updated y coords)
+              var targetName1 = typeof replacedLink1.target === 'string' ? replacedLink1.target : replacedLink1.target.name;
+              var actualTarget1 = graph.nodes.find(function(n) { return n.name === targetName1; });
+              if (actualTarget1 && actualTarget1.y0 !== undefined) {
+                link1TargetY = (actualTarget1.y0 + actualTarget1.y1) / 2;
+              } else {
+                link1TargetY = (link1.target.y0 + link1.target.y1) / 2;
+              }
+            } else {
+              link1TargetY = (link1.target.y0 + link1.target.y1) / 2;
+            }
           } else {
-            if (link1.target.column > link2.target.column) {
-              // link1 is longer, project link1 to link2's target position
-              var link1Adj = linkPerpendicularYToLinkTarget(link1, link2);
-              return link1Adj - link2.y1;
-            }
-            if (link2.target.column > link1.target.column) {
-              // link2 is longer, project link2 to link1's target position
-              var link2Adj = linkPerpendicularYToLinkTarget(link2, link1);
-              return link1.y1 - link2Adj;
-            }
+            link1TargetY = (link1.target.y0 + link1.target.y1) / 2;
           }
+          
+          if (link2.target.virtual && link2.target.replacedLink !== undefined && graph.replacedLinks) {
+            var replacedLink2 = graph.replacedLinks.find(function(rl) { return rl.index === link2.target.replacedLink; });
+            if (replacedLink2 && replacedLink2.target) {
+              var targetName2 = typeof replacedLink2.target === 'string' ? replacedLink2.target : replacedLink2.target.name;
+              var actualTarget2 = graph.nodes.find(function(n) { return n.name === targetName2; });
+              if (actualTarget2 && actualTarget2.y0 !== undefined) {
+                link2TargetY = (actualTarget2.y0 + actualTarget2.y1) / 2;
+              } else {
+                link2TargetY = (link2.target.y0 + link2.target.y1) / 2;
+              }
+            } else {
+              link2TargetY = (link2.target.y0 + link2.target.y1) / 2;
+            }
+          } else {
+            link2TargetY = (link2.target.y0 + link2.target.y1) / 2;
+          }
+          
+          // Calculate slope for each link: (targetY - sourceY) / deltaX
+          // Links going UP have negative slope, links going DOWN have positive slope
+          // For minimizing crossings, sort by slope:
+          // - Links with most negative slope (going UP most steeply) should exit from TOP
+          // - Links with most positive slope (going DOWN most steeply) should exit from BOTTOM
+          var sourceY = (link1.source.y0 + link1.source.y1) / 2;
+          
+          // Get final target X positions for proper slope calculation
+          var link1TargetX, link2TargetX;
+          if (link1.target.virtual && link1.target.replacedLink !== undefined && graph.replacedLinks) {
+            var rl1 = graph.replacedLinks.find(function(rl) { return rl.index === link1.target.replacedLink; });
+            if (rl1 && rl1.target) {
+              var tn1 = typeof rl1.target === 'string' ? rl1.target : rl1.target.name;
+              var at1 = graph.nodes.find(function(n) { return n.name === tn1; });
+              link1TargetX = at1 ? at1.x0 : link1.target.x0;
+            } else {
+              link1TargetX = link1.target.x0;
+            }
+          } else {
+            link1TargetX = link1.target.x0;
+          }
+          
+          if (link2.target.virtual && link2.target.replacedLink !== undefined && graph.replacedLinks) {
+            var rl2 = graph.replacedLinks.find(function(rl) { return rl.index === link2.target.replacedLink; });
+            if (rl2 && rl2.target) {
+              var tn2 = typeof rl2.target === 'string' ? rl2.target : rl2.target.name;
+              var at2 = graph.nodes.find(function(n) { return n.name === tn2; });
+              link2TargetX = at2 ? at2.x0 : link2.target.x0;
+            } else {
+              link2TargetX = link2.target.x0;
+            }
+          } else {
+            link2TargetX = link2.target.x0;
+          }
+          
+          var link1DeltaX = link1TargetX - link1.source.x1;
+          var link2DeltaX = link2TargetX - link2.source.x1;
+          
+          // Avoid division by zero
+          if (link1DeltaX === 0) link1DeltaX = 1;
+          if (link2DeltaX === 0) link2DeltaX = 1;
+          
+          var link1Slope = (link1TargetY - sourceY) / link1DeltaX;
+          var link2Slope = (link2TargetY - sourceY) / link2DeltaX;
+          
+          // Sort by slope: smaller slope (more negative = more upward) first
+          return link1Slope - link2Slope;
         }
 
         // if only one is circular, the move top links up, or bottom links down
@@ -221,24 +342,77 @@ export function sortTargetLinks(inputGraph, id) {
 
     if (nodesTargetLinksLength > 1) {
       nodesTargetLinks.sort(function(link1, link2) {
-        // if both are not circular, the base on the source y position
+        // if both are not circular, sort by the link's source y position
         if (!link1.circular && !link2.circular) {
-          if (link1.source.column == link2.source.column) {
-            return link1.y0 - link2.y0;
-          } else if (!sameInclines(link1, link2)) {
-            return link1.y0 - link2.y0;
+          // Get the final source Y for each link
+          // For virtual links, use the real source from replacedLinks
+          var link1SourceY;
+          var link2SourceY;
+          
+          if (link1.source.virtual && link1.source.replacedLink !== undefined && graph.replacedLinks) {
+            var replacedLink1 = graph.replacedLinks.find(function(rl) { return rl.index === link1.source.replacedLink; });
+            if (replacedLink1 && replacedLink1.source) {
+              var sourceName1 = typeof replacedLink1.source === 'string' ? replacedLink1.source : replacedLink1.source.name;
+              var actualSource1 = graph.nodes.find(function(n) { return n.name === sourceName1; });
+              link1SourceY = actualSource1 && actualSource1.y0 !== undefined ? 
+                (actualSource1.y0 + actualSource1.y1) / 2 : (link1.source.y0 + link1.source.y1) / 2;
+            } else {
+              link1SourceY = (link1.source.y0 + link1.source.y1) / 2;
+            }
           } else {
-            // get the angle of the link to the further source node (ie the smaller column)
-            if (link2.source.column < link1.source.column) {
-              var link2Adj = linkPerpendicularYToLinkSource(link2, link1);
-
-              return link1.y0 - link2Adj;
+            link1SourceY = (link1.source.y0 + link1.source.y1) / 2;
+          }
+          
+          if (link2.source.virtual && link2.source.replacedLink !== undefined && graph.replacedLinks) {
+            var replacedLink2 = graph.replacedLinks.find(function(rl) { return rl.index === link2.source.replacedLink; });
+            if (replacedLink2 && replacedLink2.source) {
+              var sourceName2 = typeof replacedLink2.source === 'string' ? replacedLink2.source : replacedLink2.source.name;
+              var actualSource2 = graph.nodes.find(function(n) { return n.name === sourceName2; });
+              link2SourceY = actualSource2 && actualSource2.y0 !== undefined ? 
+                (actualSource2.y0 + actualSource2.y1) / 2 : (link2.source.y0 + link2.source.y1) / 2;
+            } else {
+              link2SourceY = (link2.source.y0 + link2.source.y1) / 2;
             }
-            if (link1.source.column < link2.source.column) {
-              var link1Adj = linkPerpendicularYToLinkSource(link1, link2);
-
-              return link1Adj - link2.y0;
+          } else {
+            link2SourceY = (link2.source.y0 + link2.source.y1) / 2;
+          }
+          
+          // For incoming links from the SAME column, sort by source Y
+          // For incoming links from DIFFERENT columns, use slope to minimize crossings
+          var link1SourceCol = link1.source.column;
+          var link2SourceCol = link2.source.column;
+          
+          // Get actual source column for virtual links
+          if (link1.source.virtual && link1.source.replacedLink !== undefined && graph.replacedLinks) {
+            var rl1 = graph.replacedLinks.find(function(rl) { return rl.index === link1.source.replacedLink; });
+            if (rl1 && rl1.source) {
+              var sn1 = typeof rl1.source === 'string' ? rl1.source : rl1.source.name;
+              var as1 = graph.nodes.find(function(n) { return n.name === sn1; });
+              if (as1) link1SourceCol = as1.column;
             }
+          }
+          if (link2.source.virtual && link2.source.replacedLink !== undefined && graph.replacedLinks) {
+            var rl2 = graph.replacedLinks.find(function(rl) { return rl.index === link2.source.replacedLink; });
+            if (rl2 && rl2.source) {
+              var sn2 = typeof rl2.source === 'string' ? rl2.source : rl2.source.name;
+              var as2 = graph.nodes.find(function(n) { return n.name === sn2; });
+              if (as2) link2SourceCol = as2.column;
+            }
+          }
+          
+          if (link1SourceCol === link2SourceCol) {
+            // Same column: sort by source Y position
+            return link1SourceY - link2SourceY;
+          } else {
+            // Different columns: sort by slope
+            // Links with smaller slope (more gradual) should enter from top
+            var targetY = (link1.target.y0 + link1.target.y1) / 2;
+            var targetCol = link1.target.column;
+            
+            var link1Slope = (link1SourceY - targetY) / (targetCol - link1SourceCol);
+            var link2Slope = (link2SourceY - targetY) / (targetCol - link2SourceCol);
+            
+            return link1Slope - link2Slope;
           }
         }
 
