@@ -51,10 +51,44 @@ export function ascendingBreadth(a, b) {
    // sort links based on the distance between the source and tartget node columns
   // if the same, then use Y position of the source node
   export function sortLinkColumnAscending(link1, link2) {
+    // For bottom circular links:
+    // Special handling for same-source and same-target links
+    if (link1.circularLinkType == 'bottom' && link2.circularLinkType == 'bottom') {
+      var dist1 = Math.abs(linkColumnDistance(link1));
+      var dist2 = Math.abs(linkColumnDistance(link2));
+      
+      // Same SOURCE: sort by span distance (shorter first, closer to nodes)
+      // This is critical for links like schedule ● → schedule ○ vs schedule ● → search ◐
+      if (link1.source.column === link2.source.column) {
+        if (dist1 != dist2) {
+          return dist1 - dist2;
+        }
+        return link1.target.column - link2.target.column;
+      }
+      
+      // Same TARGET: sort by span distance (shorter first, closer to nodes)
+      if (link1.target.column === link2.target.column) {
+        if (dist1 != dist2) {
+          return dist1 - dist2;
+        }
+        return link2.source.column - link1.source.column;
+      }
+      
+      // Different source and different target: sort by target column to group by target
+      if (link1.target.column != link2.target.column) {
+        return link1.target.column - link2.target.column;
+      }
+      
+      // Same target column but different sources, sort by span
+      if (dist1 != dist2) {
+        return dist1 - dist2;
+      }
+      
+      return sortLinkSourceYDescending(link1, link2);
+    }
+    // For top circular links: original logic
     if (linkColumnDistance(link1) == linkColumnDistance(link2)) {
-      return link1.circularLinkType == 'bottom'
-        ? sortLinkSourceYDescending(link1, link2)
-        : sortLinkSourceYAscending(link1, link2);
+      return sortLinkSourceYAscending(link1, link2);
     } else {
       return linkColumnDistance(link2) - linkColumnDistance(link1);
     }

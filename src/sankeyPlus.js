@@ -1270,7 +1270,8 @@ class SankeyChart {
       .attr("width", (d) => d.x1 - d.x0)
       .style("fill", this.config.nodes.fill)
       .style("stroke", this.config.nodes.stroke)
-      .style("opacity", this.config.nodes.opacity);
+      .style("opacity", this.config.nodes.opacity)
+      .style("cursor", "pointer");
 
     node
       .append("text")
@@ -1283,6 +1284,55 @@ class SankeyChart {
     node.append("title").text(function (d) {
       return d.name + "\n" + d.value;
     });
+
+    // Node hover handlers
+    const graphLinks = this.graph.links;
+    const nodeOpacity = this.config.nodes.opacity;
+    const linkOpacity = this.config.links.opacity;
+    
+    node
+      .on("mouseenter", function(event, d) {
+        const dimOpacity = 0.1;
+        
+        // Find all links connected to this node
+        const connectedLinks = graphLinks.filter(link => 
+          link.source === d || link.target === d
+        );
+        
+        // Find all connected nodes
+        const connectedNodes = new Set([d]);
+        connectedLinks.forEach(link => {
+          connectedNodes.add(link.source);
+          connectedNodes.add(link.target);
+        });
+        
+        // Dim all links
+        g.selectAll(".sankey-link")
+          .style("stroke-opacity", link => 
+            connectedLinks.includes(link) ? 1 : dimOpacity
+          );
+        
+        // Dim all nodes
+        g.selectAll(".nodes g rect")
+          .style("opacity", nodeData => 
+            connectedNodes.has(nodeData) ? nodeOpacity : dimOpacity
+          );
+        g.selectAll(".nodes g text")
+          .style("opacity", nodeData => 
+            connectedNodes.has(nodeData) ? 1 : dimOpacity
+          );
+      })
+      .on("mouseleave", function() {
+        // Restore all links
+        g.selectAll(".sankey-link")
+          .style("stroke-opacity", linkOpacity);
+        
+        // Restore all nodes
+        g.selectAll(".nodes g rect")
+          .style("opacity", nodeOpacity);
+        g.selectAll(".nodes g text")
+          .style("opacity", 1);
+      });
 
     var link = linkG.data(this.graph.links).enter().append("g");
 
@@ -1300,6 +1350,10 @@ class SankeyChart {
       return defaultLinkColor;
     };
 
+    const dimOpacity = 0.1;
+    const normalLinkOpacity = this.config.links.opacity;
+    const normalNodeOpacity = this.config.nodes.opacity;
+
     link
       .filter((d) => d.path)
       .append("path")
@@ -1315,7 +1369,43 @@ class SankeyChart {
       })
       .attr("d", (d) => d.path)
       .style("stroke-width", (d) => Math.max(1, d.width))
-      .style("stroke", getLinkColor);
+      .style("stroke", getLinkColor)
+      .style("cursor", "pointer")
+      .on("mouseenter", function(event, d) {
+        // Dim all links
+        g.selectAll(".sankey-link")
+          .style("stroke-opacity", dimOpacity);
+        
+        // Dim all nodes
+        g.selectAll(".nodes g rect")
+          .style("opacity", dimOpacity);
+        g.selectAll(".nodes g text")
+          .style("opacity", dimOpacity);
+        
+        // Highlight hovered link
+        select(this).style("stroke-opacity", 1);
+        
+        // Highlight connected nodes
+        g.selectAll(".nodes g")
+          .filter(nodeData => nodeData === d.source || nodeData === d.target)
+          .selectAll("rect")
+          .style("opacity", normalNodeOpacity);
+        g.selectAll(".nodes g")
+          .filter(nodeData => nodeData === d.source || nodeData === d.target)
+          .selectAll("text")
+          .style("opacity", 1);
+      })
+      .on("mouseleave", function() {
+        // Restore all links
+        g.selectAll(".sankey-link")
+          .style("stroke-opacity", normalLinkOpacity);
+        
+        // Restore all nodes
+        g.selectAll(".nodes g rect")
+          .style("opacity", normalNodeOpacity);
+        g.selectAll(".nodes g text")
+          .style("opacity", 1);
+      });
 
     link.append("title").text(function (d) {
       let typeName = "";

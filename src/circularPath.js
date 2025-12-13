@@ -224,14 +224,25 @@ export function addCircularPathData(
 function calcVerticalBuffer(links, id, circularLinkGap) {
   links.sort(sortLinkColumnAscending);
   
+  console.log("=== calcVerticalBuffer ===");
+  links.forEach(function(l, idx) {
+    var srcName = l.source.name || l.source.index;
+    var tgtName = l.target.name || l.target.index;
+    console.log(`  [${idx}] ${srcName} -> ${tgtName}, col ${l.source.column}->${l.target.column}, w=${l.width.toFixed(2)}`);
+  });
+  
   links.forEach(function (link, i) {
     var buffer = 0;
+    var srcName = link.source.name || link.source.index;
+    var tgtName = link.target.name || link.target.index;
 
     if (selfLinking(link, id)) {
       link.circularPathData.verticalBuffer = buffer + link.width / 2;
     } else {
       for (var j = 0; j < i; j++) {
         if (!selfLinking(links[j], id) && circularLinksActuallyCross(links[i], links[j])) {
+          var prevSrcName = links[j].source.name || links[j].source.index;
+          var prevTgtName = links[j].target.name || links[j].target.index;
           // Smaller gap for links to same target
           var sameTarget = (links[i].target.name || links[i].target.index) === 
                            (links[j].target.name || links[j].target.index);
@@ -242,23 +253,42 @@ function calcVerticalBuffer(links, id, circularLinkGap) {
             links[j].width / 2 +
             gap;
           
+          console.log(`  [${i}] ${srcName}->${tgtName} CROSSES [${j}] ${prevSrcName}->${prevTgtName}, gap=${gap}, buf=${bufferOverThisLink.toFixed(2)}`);
+          
           buffer = bufferOverThisLink > buffer ? bufferOverThisLink : buffer;
         }
       }
 
       link.circularPathData.verticalBuffer = buffer + link.width / 2;
+      console.log(`  => [${i}] ${srcName}->${tgtName} final vBuf = ${link.circularPathData.verticalBuffer.toFixed(2)}`);
     }
   });
 
   return links;
 }
 
-// Links cross ONLY if they actually overlap on vertical or horizontal segments
+// Links cross only if their horizontal ranges overlap AND they share a column
 function circularLinksActuallyCross(link1, link2) {
   var link1Source = link1.source.column;
   var link1Target = link1.target.column;
   var link2Source = link2.source.column;
   var link2Target = link2.target.column;
+  
+  // Calculate horizontal ranges
+  var link1Min = Math.min(link1Source, link1Target);
+  var link1Max = Math.max(link1Source, link1Target);
+  var link2Min = Math.min(link2Source, link2Target);
+  var link2Max = Math.max(link2Source, link2Target);
+  
+  // First check: do horizontal ranges overlap or touch at boundary?
+  // If ranges don't overlap at all, links can be at same Y level without crossing
+  var rangesOverlap = link1Max >= link2Min && link2Max >= link1Min;
+  
+  if (!rangesOverlap) {
+    return false;
+  }
+  
+  // Ranges overlap - check for specific crossing conditions
   
   // Same source column = right vertical segments overlap
   if (link1Source === link2Source) return true;
@@ -266,29 +296,14 @@ function circularLinksActuallyCross(link1, link2) {
   // Same target column = left vertical segments overlap  
   if (link1Target === link2Target) return true;
   
-  // For horizontal overlap check, use strict overlap (not just touching)
-  // Link ranges (for backlinks, target < source typically)
-  var link1Left = Math.min(link1Source, link1Target);
-  var link1Right = Math.max(link1Source, link1Target);
-  var link2Left = Math.min(link2Source, link2Target);
-  var link2Right = Math.max(link2Source, link2Target);
+  // Boundary touching: one link's target = other link's source (verticals at same column)
+  if (link1Target === link2Source || link1Source === link2Target) return true;
   
-  // Check if horizontal segments actually overlap (not just touch)
-  // Two segments [a,b] and [c,d] overlap if a < d AND c < b
-  var horizontalOverlap = link1Left < link2Right && link2Left < link1Right;
-  
-  if (!horizontalOverlap) return false;
-  
-  // If horizontal segments overlap, check if one link's vertical segment
-  // is STRICTLY INSIDE the other's horizontal range (not at endpoints)
-  // Link2's source vertical is inside link1's horizontal range
-  if (link2Source > link1Left && link2Source < link1Right) return true;
-  // Link2's target vertical is inside link1's horizontal range
-  if (link2Target > link1Left && link2Target < link1Right) return true;
-  // Link1's source vertical is inside link2's horizontal range
-  if (link1Source > link2Left && link1Source < link2Right) return true;
-  // Link1's target vertical is inside link2's horizontal range
-  if (link1Target > link2Left && link1Target < link2Right) return true;
+  // One link's vertical segment is strictly within the other's horizontal span
+  if (link2Source > link1Min && link2Source < link1Max) return true;
+  if (link2Target > link1Min && link2Target < link1Max) return true;
+  if (link1Source > link2Min && link1Source < link2Max) return true;
+  if (link1Target > link2Min && link1Target < link2Max) return true;
   
   return false;
 }
