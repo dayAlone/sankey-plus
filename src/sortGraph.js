@@ -129,12 +129,14 @@ export function sortSourceLinks(inputGraph, id) {
             // if the links slope in same directions, then sort by any overlap
           } else {
             if (link1.target.column > link2.target.column) {
-              var link2Adj = linkPerpendicularYToLinkTarget(link2, link1);
-              return link1.y1 - link2Adj;
-            }
-            if (link2.target.column > link1.target.column) {
+              // link1 is longer, project link1 to link2's target position
               var link1Adj = linkPerpendicularYToLinkTarget(link1, link2);
               return link1Adj - link2.y1;
+            }
+            if (link2.target.column > link1.target.column) {
+              // link2 is longer, project link2 to link1's target position
+              var link2Adj = linkPerpendicularYToLinkTarget(link2, link1);
+              return link1.y1 - link2Adj;
             }
           }
         }
