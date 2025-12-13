@@ -273,12 +273,8 @@ function calcVerticalBuffer(links, id, circularLinkGap) {
   return links;
 }
 
-// Links cross ONLY if they share a vertical segment column
-// Vertical segments are at source column (right) and target column (left)
+// Links cross ONLY if they actually overlap on vertical or horizontal segments
 function circularLinksActuallyCross(link1, link2) {
-  // Links only need to stack if their vertical segments are in the same column
-  // OR if one link's horizontal segment crosses another's vertical segment
-  
   var link1Source = link1.source.column;
   var link1Target = link1.target.column;
   var link2Source = link2.source.column;
@@ -290,22 +286,28 @@ function circularLinksActuallyCross(link1, link2) {
   // Same target column = left vertical segments overlap  
   if (link1Target === link2Target) return true;
   
-  // Link1's source = Link2's target or vice versa = segments touch
-  if (link1Source === link2Target || link1Target === link2Source) return true;
-  
-  // Check if horizontal segment of one crosses vertical segment of another
+  // For horizontal overlap check, use strict overlap (not just touching)
+  // Link ranges (for backlinks, target < source typically)
   var link1Left = Math.min(link1Source, link1Target);
   var link1Right = Math.max(link1Source, link1Target);
   var link2Left = Math.min(link2Source, link2Target);
   var link2Right = Math.max(link2Source, link2Target);
   
-  // Link2's source is inside link1's horizontal range
+  // Check if horizontal segments actually overlap (not just touch)
+  // Two segments [a,b] and [c,d] overlap if a < d AND c < b
+  var horizontalOverlap = link1Left < link2Right && link2Left < link1Right;
+  
+  if (!horizontalOverlap) return false;
+  
+  // If horizontal segments overlap, check if one link's vertical segment
+  // is STRICTLY INSIDE the other's horizontal range (not at endpoints)
+  // Link2's source vertical is inside link1's horizontal range
   if (link2Source > link1Left && link2Source < link1Right) return true;
-  // Link2's target is inside link1's horizontal range
+  // Link2's target vertical is inside link1's horizontal range
   if (link2Target > link1Left && link2Target < link1Right) return true;
-  // Link1's source is inside link2's horizontal range
+  // Link1's source vertical is inside link2's horizontal range
   if (link1Source > link2Left && link1Source < link2Right) return true;
-  // Link1's target is inside link2's horizontal range
+  // Link1's target vertical is inside link2's horizontal range
   if (link1Target > link2Left && link1Target < link2Right) return true;
   
   return false;
