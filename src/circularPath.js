@@ -37,13 +37,13 @@ export function addCircularPathData(
     return l.circularLinkType == "top";
   });
 
-  calcVerticalBuffer(topLinks, id, circularLinkGap);
+  calcVerticalBuffer(topLinks, graph.nodes, id, circularLinkGap);
 
   var bottomLinks = graph.links.filter(function (l) {
     return l.circularLinkType == "bottom";
   });
 
-  calcVerticalBuffer(bottomLinks, id, circularLinkGap);
+  calcVerticalBuffer(bottomLinks, graph.nodes, id, circularLinkGap);
 
   // add the base data for each link
   graph.links.forEach(function (link) {
@@ -221,7 +221,12 @@ export function addCircularPathData(
 }
 
 // creates vertical buffer values per set of top/bottom links
-function calcVerticalBuffer(links, id, circularLinkGap) {
+function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
+  // Pre-calculate base Y for each link to optimize collision logic
+  links.forEach(function(link) {
+    link.circularPathData.baseY = getLinkBaseY(link, nodes, link.circularLinkType);
+  });
+
   // Pre-calculate max span for each target column (for group ordering)
   var maxSpanByTarget = {};
   links.forEach(function(link) {
@@ -268,6 +273,23 @@ function calcVerticalBuffer(links, id, circularLinkGap) {
             links[j].width / 2 +
             gap;
           
+          // Fix for visual hole: adjust buffer requirement based on vertical separation of base positions
+          var thisBaseY = link.circularPathData.baseY;
+          var prevBaseY = links[j].circularPathData.baseY;
+          var offsetCorrection = 0;
+          
+          if (link.circularLinkType === "bottom") {
+             // For bottom links (curve down), if this link is naturally lower (larger BaseY)
+             // than the previous link, we need less buffer.
+             offsetCorrection = prevBaseY - thisBaseY;
+          } else {
+             // For top links (curve up), if this link is naturally higher (smaller BaseY)
+             // than the previous link, we need less buffer.
+             offsetCorrection = thisBaseY - prevBaseY;
+          }
+          
+          bufferOverThisLink += offsetCorrection;
+
           console.log(`  [${i}] ${srcName}->${tgtName} CROSSES [${j}] ${prevSrcName}->${prevTgtName}, gap=${gap}, buf=${bufferOverThisLink.toFixed(2)}`);
           
           buffer = bufferOverThisLink > buffer ? bufferOverThisLink : buffer;
@@ -513,4 +535,24 @@ function createCircularPathString(link) {
   }
 
   return pathString;
+}
+
+function getLinkBaseY(link, nodes, type) {
+  // Find min/max Y of REAL nodes between source and target columns
+  // Exclude virtual nodes
+  var relevantMinY = Math.min(link.source.y0, link.target.y0);
+  var relevantMaxY = Math.max(link.source.y1, link.target.y1);
+  
+  nodes.forEach(function(node) {
+    if (node.virtual || (node.name && node.name.indexOf('virtualNode') === 0)) {
+      return;
+    }
+    if (node.column >= Math.min(link.source.column, link.target.column) && 
+        node.column <= Math.max(link.source.column, link.target.column)) {
+      if (node.y0 < relevantMinY) relevantMinY = node.y0;
+      if (node.y1 > relevantMaxY) relevantMaxY = node.y1;
+    }
+  });
+  
+  return type === "bottom" ? relevantMaxY : relevantMinY;
 }
