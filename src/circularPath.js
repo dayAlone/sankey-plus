@@ -290,20 +290,23 @@ function circularLinksActuallyCross(link1, link2) {
   
   // Ranges overlap - check for specific crossing conditions
   
-  // Same source column = right vertical segments overlap
-  if (link1Source === link2Source) return true;
+  var sameSource = (link1Source === link2Source);
+  var sameTarget = (link1Target === link2Target);
   
-  // Same target column = left vertical segments overlap  
-  if (link1Target === link2Target) return true;
+  // Same TARGET column = left vertical segments would overlap at target
+  if (sameTarget) return true;
+  
+  // Same SOURCE: stack them to maintain span-distance ordering
+  // With sorting, shorter spans are processed first, longer spans stack on them
+  if (sameSource) return true;
   
   // Boundary touching: one link's target = other link's source (verticals at same column)
   if (link1Target === link2Source || link1Source === link2Target) return true;
   
-  // One link's vertical segment is strictly within the other's horizontal span
-  if (link2Source > link1Min && link2Source < link1Max) return true;
-  if (link2Target > link1Min && link2Target < link1Max) return true;
-  if (link1Source > link2Min && link1Source < link2Max) return true;
-  if (link1Target > link2Min && link1Target < link2Max) return true;
+  // With proper span-distance sorting, other crossings (vertical inside range) don't occur:
+  // - Shorter span is processed first (higher, smaller vBuf)
+  // - Its vertical segments end above the longer span's horizontal
+  // - So no actual visual crossing happens
   
   return false;
 }
