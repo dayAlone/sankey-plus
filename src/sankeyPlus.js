@@ -1316,7 +1316,7 @@ class SankeyChart {
       .text(this.config.id);
 
     node.append("title").text(function (d) {
-      return d.name + "\n" + d.value;
+      return d.name;
     });
 
     // Node hover handlers
@@ -1480,7 +1480,7 @@ class SankeyChart {
           typeName = "\nType: " + linkTypes[linkType].name;
         }
       }
-      return d.source.name + " -> " + d.target.name + "\nIndex: " + d.index + typeName;
+      return d.source.name + " -> " + d.target.name + "\n" + d.value + typeName;
     });
 
     svg
