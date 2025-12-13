@@ -290,7 +290,7 @@ export function sortSourceLinks(inputGraph, id) {
             // ...and they both loop the same way (both bottom)
             // ...and they both connect to a target with same column, then sort by the target's y
             if (link1.target.column === link2.target.column) {
-              return link2.target.y1 - link1.target.y1;
+              return link1.target.y1 - link2.target.y1;
             } else {
               // ...and they connect to different column targets, then sort by how far back they
               return link1.target.column - link2.target.column;
