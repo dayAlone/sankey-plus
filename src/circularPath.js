@@ -224,29 +224,14 @@ export function addCircularPathData(
 function calcVerticalBuffer(links, id, circularLinkGap) {
   links.sort(sortLinkColumnAscending);
   
-  // Log all bottom links to search ◐
-  console.log("=== calcVerticalBuffer ===");
-  console.log("Links sorted by column distance:");
-  links.forEach(function(l, idx) {
-    var srcName = l.source.name || l.source.index;
-    var tgtName = l.target.name || l.target.index;
-    console.log(`  [${idx}] ${srcName} -> ${tgtName}, source.column=${l.source.column}, target.column=${l.target.column}, width=${l.width}`);
-  });
-  
   links.forEach(function (link, i) {
     var buffer = 0;
-    var srcName = link.source.name || link.source.index;
-    var tgtName = link.target.name || link.target.index;
 
     if (selfLinking(link, id)) {
       link.circularPathData.verticalBuffer = buffer + link.width / 2;
     } else {
       for (var j = 0; j < i; j++) {
-        var prevSrcName = links[j].source.name || links[j].source.index;
-        var prevTgtName = links[j].target.name || links[j].target.index;
-        var crosses = circularLinksActuallyCross(links[i], links[j]);
-        
-        if (!selfLinking(links[j], id) && crosses) {
+        if (!selfLinking(links[j], id) && circularLinksActuallyCross(links[i], links[j])) {
           // Smaller gap for links to same target
           var sameTarget = (links[i].target.name || links[i].target.index) === 
                            (links[j].target.name || links[j].target.index);
@@ -256,17 +241,12 @@ function calcVerticalBuffer(links, id, circularLinkGap) {
             links[j].circularPathData.verticalBuffer +
             links[j].width / 2 +
             gap;
-            
-          console.log(`  Checking [${i}] ${srcName}->${tgtName} vs [${j}] ${prevSrcName}->${prevTgtName}: CROSSES, sameTarget=${sameTarget}, gap=${gap}, bufferOverThisLink=${bufferOverThisLink}`);
           
           buffer = bufferOverThisLink > buffer ? bufferOverThisLink : buffer;
-        } else if (!selfLinking(links[j], id)) {
-          console.log(`  Checking [${i}] ${srcName}->${tgtName} vs [${j}] ${prevSrcName}->${prevTgtName}: NO CROSS`);
         }
       }
 
       link.circularPathData.verticalBuffer = buffer + link.width / 2;
-      console.log(`  => [${i}] ${srcName}->${tgtName} final verticalBuffer = ${link.circularPathData.verticalBuffer}`);
     }
   });
 
