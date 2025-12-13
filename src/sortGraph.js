@@ -56,16 +56,24 @@ export function ascendingBreadth(a, b) {
       var dist1 = Math.abs(linkColumnDistance(link1));
       var dist2 = Math.abs(linkColumnDistance(link2));
       
-      // Primary: Group by TARGET column (all links to same target together)
+      // Get max span for each link's target group (set by calcVerticalBuffer)
+      var maxSpan1 = link1._targetGroupMaxSpan || dist1;
+      var maxSpan2 = link2._targetGroupMaxSpan || dist2;
+      
+      // Primary: Sort GROUPS by their max span (shorter max span = higher = first)
+      // This prevents groups with long spans from overlapping groups with short spans
       if (link1.target.column !== link2.target.column) {
+        if (maxSpan1 !== maxSpan2) {
+          return maxSpan1 - maxSpan2; // shorter group max span first
+        }
+        // Same max span - fall back to target column
         return link1.target.column - link2.target.column;
       }
       
-      // Secondary: Within same target, sort by span distance
-      // LONGER spans first = further sources get processed first = smaller vBuf = closer to nodes
-      // Wait, we want further sources LOWER (larger vBuf), so SHORTER spans first
+      // Secondary: Within same target group, sort by individual span distance
+      // Shorter spans first = closer sources higher
       if (dist1 !== dist2) {
-        return dist1 - dist2; // shorter span first = closer source = smaller vBuf = higher
+        return dist1 - dist2;
       }
       
       // Tertiary: Same target, same span - sort by source column

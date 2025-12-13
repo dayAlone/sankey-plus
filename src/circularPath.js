@@ -222,6 +222,21 @@ export function addCircularPathData(
 
 // creates vertical buffer values per set of top/bottom links
 function calcVerticalBuffer(links, id, circularLinkGap) {
+  // Pre-calculate max span for each target column (for group ordering)
+  var maxSpanByTarget = {};
+  links.forEach(function(link) {
+    var targetCol = link.target.column;
+    var span = Math.abs(link.source.column - link.target.column);
+    if (maxSpanByTarget[targetCol] === undefined || span > maxSpanByTarget[targetCol]) {
+      maxSpanByTarget[targetCol] = span;
+    }
+  });
+  
+  // Attach max span to each link for sorting
+  links.forEach(function(link) {
+    link._targetGroupMaxSpan = maxSpanByTarget[link.target.column];
+  });
+  
   links.sort(sortLinkColumnAscending);
   
   console.log("=== calcVerticalBuffer ===");
