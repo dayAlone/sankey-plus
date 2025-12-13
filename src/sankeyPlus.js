@@ -1434,11 +1434,29 @@ class SankeyChart {
         
         // Highlight connected nodes
         g.selectAll(".nodes g")
-          .filter(nodeData => nodeData === d.source || nodeData === d.target)
+          .filter((nodeData) => {
+            return (
+              nodeData === d.source ||
+              nodeData === d.target ||
+              (d.source && nodeData.index === d.source.index) ||
+              (d.target && nodeData.index === d.target.index) ||
+              (d.source && nodeData.name === d.source.name) ||
+              (d.target && nodeData.name === d.target.name)
+            );
+          })
           .selectAll("rect")
           .style("opacity", normalNodeOpacity);
         g.selectAll(".nodes g")
-          .filter(nodeData => nodeData === d.source || nodeData === d.target)
+          .filter((nodeData) => {
+            return (
+              nodeData === d.source ||
+              nodeData === d.target ||
+              (d.source && nodeData.index === d.source.index) ||
+              (d.target && nodeData.index === d.target.index) ||
+              (d.source && nodeData.name === d.source.name) ||
+              (d.target && nodeData.name === d.target.name)
+            );
+          })
           .selectAll("text")
           .style("opacity", 1);
       })
