@@ -1271,7 +1271,8 @@ class SankeyChart {
       .style("fill", this.config.nodes.fill)
       .style("stroke", this.config.nodes.stroke)
       .style("opacity", this.config.nodes.opacity)
-      .style("cursor", "pointer");
+      .style("cursor", "pointer")
+      .style("transition", "opacity 0.3s ease");
 
     node
       .append("text")
@@ -1279,6 +1280,7 @@ class SankeyChart {
       .attr("y", (d) => d.y0 - 8)
       .attr("dy", "0.35em")
       .attr("text-anchor", "middle")
+      .style("transition", "opacity 0.3s ease")
       .text(this.config.id);
 
     node.append("title").text(function (d) {
@@ -1371,6 +1373,7 @@ class SankeyChart {
       .style("stroke-width", (d) => Math.max(1, d.width))
       .style("stroke", getLinkColor)
       .style("cursor", "pointer")
+      .style("transition", "stroke-opacity 0.3s ease")
       .on("mouseenter", function(event, d) {
         // Dim all links
         g.selectAll(".sankey-link")
