@@ -1296,35 +1296,44 @@ class SankeyChart {
       .on("mouseenter", function(event, d) {
         const dimOpacity = 0.1;
         
-        // Find all links connected to this node (using Set for faster lookup)
-        const connectedLinksSet = new Set();
-        graphLinks.forEach(link => {
-          if (link.source === d || link.target === d) {
-            connectedLinksSet.add(link);
+        // Find all links connected to this node (using Set of indices for reliable comparison)
+        const connectedLinkIndices = new Set();
+        graphLinks.forEach((link, idx) => {
+          // Check both by reference and by name (in case objects differ)
+          const sourceMatch = link.source === d || 
+                             (link.source && link.source.name === d.name);
+          const targetMatch = link.target === d || 
+                             (link.target && link.target.name === d.name);
+          if (sourceMatch || targetMatch) {
+            connectedLinkIndices.add(link.index !== undefined ? link.index : idx);
           }
         });
         
-        // Find all connected nodes
-        const connectedNodes = new Set([d]);
-        connectedLinksSet.forEach(link => {
-          connectedNodes.add(link.source);
-          connectedNodes.add(link.target);
+        // Find all connected nodes (by name for reliable matching)
+        const connectedNodeNames = new Set([d.name]);
+        graphLinks.forEach((link, idx) => {
+          const linkIdx = link.index !== undefined ? link.index : idx;
+          if (connectedLinkIndices.has(linkIdx)) {
+            if (link.source && link.source.name) connectedNodeNames.add(link.source.name);
+            if (link.target && link.target.name) connectedNodeNames.add(link.target.name);
+          }
         });
         
         // Dim all links, highlight connected ones
         g.selectAll(".sankey-link")
-          .style("stroke-opacity", linkData => 
-            connectedLinksSet.has(linkData) ? 1 : dimOpacity
-          );
+          .style("stroke-opacity", (linkData, i) => {
+            const linkIdx = linkData.index !== undefined ? linkData.index : i;
+            return connectedLinkIndices.has(linkIdx) ? 1 : dimOpacity;
+          });
         
         // Dim all nodes, highlight connected ones
         g.selectAll(".nodes g rect")
           .style("opacity", nodeData => 
-            connectedNodes.has(nodeData) ? nodeOpacity : dimOpacity
+            connectedNodeNames.has(nodeData.name) ? nodeOpacity : dimOpacity
           );
         g.selectAll(".nodes g text")
           .style("opacity", nodeData => 
-            connectedNodes.has(nodeData) ? 1 : dimOpacity
+            connectedNodeNames.has(nodeData.name) ? 1 : dimOpacity
           );
       })
       .on("mouseleave", function() {
