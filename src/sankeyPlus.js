@@ -1323,7 +1323,7 @@ class SankeyChart {
         g.selectAll(".sankey-link")
           .style("stroke-opacity", (linkData, i) => {
             const linkIdx = linkData.index !== undefined ? linkData.index : i;
-            return connectedLinkIndices.has(linkIdx) ? 0.85 : dimOpacity;
+            return connectedLinkIndices.has(linkIdx) ? linkOpacity : dimOpacity;
           });
         
         // Dim all nodes, highlight connected ones
@@ -1398,7 +1398,7 @@ class SankeyChart {
           .style("opacity", dimOpacity);
         
         // Highlight hovered link
-        select(this).style("stroke-opacity", 0.85);
+        select(this).style("stroke-opacity", normalLinkOpacity);
         
         // Highlight connected nodes
         g.selectAll(".nodes g")
