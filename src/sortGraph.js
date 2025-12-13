@@ -56,31 +56,21 @@ export function ascendingBreadth(a, b) {
       var dist1 = Math.abs(linkColumnDistance(link1));
       var dist2 = Math.abs(linkColumnDistance(link2));
       
-      var sameSource = link1.source.column === link2.source.column;
-      var sameTarget = link1.target.column === link2.target.column;
-      
-      // If links share source OR target, sort by span distance (shorter first)
-      // This keeps related links together and orders them correctly
-      if (sameSource || sameTarget) {
-        if (dist1 !== dist2) {
-          return dist1 - dist2;
-        }
-        // Same span: sort by the non-shared column
-        if (sameSource) {
-          return link1.target.column - link2.target.column;
-        } else {
-          return link2.source.column - link1.source.column;
-        }
-      }
-      
-      // Different source AND different target: group by target column
+      // Primary: Group by TARGET column (all links to same target together)
       if (link1.target.column !== link2.target.column) {
         return link1.target.column - link2.target.column;
       }
       
-      // Fallback: sort by span
+      // Secondary: Within same target, sort by span distance
+      // LONGER spans first = further sources get processed first = smaller vBuf = closer to nodes
+      // Wait, we want further sources LOWER (larger vBuf), so SHORTER spans first
       if (dist1 !== dist2) {
-        return dist1 - dist2;
+        return dist1 - dist2; // shorter span first = closer source = smaller vBuf = higher
+      }
+      
+      // Tertiary: Same target, same span - sort by source column
+      if (link1.source.column !== link2.source.column) {
+        return link2.source.column - link1.source.column;
       }
       
       return sortLinkSourceYDescending(link1, link2);

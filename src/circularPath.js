@@ -294,11 +294,14 @@ function circularLinksActuallyCross(link1, link2) {
   var sameTarget = (link1Target === link2Target);
   
   // Same TARGET column = left vertical segments would overlap at target
+  // This includes same-source-same-target links
   if (sameTarget) return true;
   
-  // Same SOURCE: stack them to maintain span-distance ordering
-  // With sorting, shorter spans are processed first, longer spans stack on them
-  if (sameSource) return true;
+  // Same SOURCE but DIFFERENT targets:
+  // Right verticals are bundled at source column (normal Sankey behavior)
+  // With span-distance sorting, shorter spans are higher - no visual crossing
+  // DON'T force stacking - let them be positioned based on other crossings
+  // (removed: if (sameSource) return true;)
   
   // Boundary touching: one link's target = other link's source (verticals at same column)
   if (link1Target === link2Source || link1Source === link2Target) return true;
