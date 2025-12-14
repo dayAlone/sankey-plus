@@ -257,6 +257,38 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
     var tgtName = link.target.name || link.target.index;
 
     if (selfLinking(link, id)) {
+      // For self-links, calculate buffer based on overlaps with other links
+      // Self-links are always "inner" relative to other links from the same node,
+      // but they might overlap with other self-links or external circular links.
+      
+      // Basic self-link buffer
+      link.circularPathData.verticalBuffer = buffer + link.width / 2;
+      
+      // Check for collisions with other links processed so far
+      for (var j = 0; j < i; j++) {
+        if (circularLinksActuallyCross(links[i], links[j])) {
+          var gap = circularLinkGap;
+          var bufferOverThisLink =
+            links[j].circularPathData.verticalBuffer +
+            links[j].width / 2 +
+            gap;
+            
+          // Use same offset correction logic as for regular links
+          var thisBaseY = link.circularPathData.baseY;
+          var prevBaseY = links[j].circularPathData.baseY;
+          var offsetCorrection = 0;
+          
+          if (link.circularLinkType === "bottom") {
+             offsetCorrection = prevBaseY - thisBaseY;
+          } else {
+             offsetCorrection = thisBaseY - prevBaseY;
+          }
+          
+          bufferOverThisLink += offsetCorrection;
+          buffer = bufferOverThisLink > buffer ? bufferOverThisLink : buffer;
+        }
+      }
+      
       link.circularPathData.verticalBuffer = buffer + link.width / 2;
     } else {
       for (var j = 0; j < i; j++) {
@@ -343,6 +375,23 @@ function circularLinksActuallyCross(link1, link2) {
   // Boundary touching: one link's target = other link's source (verticals at same column)
   if (link1Target === link2Source || link1Source === link2Target) return true;
   
+  // Self-link handling:
+  // If one is a self-link, it spans only one column (source=target).
+  // Overlap occurs if the other link spans this column.
+  var link1Self = (link1Source === link1Target);
+  var link2Self = (link2Source === link2Target);
+  
+  if (link1Self || link2Self) {
+    var selfCol = link1Self ? link1Source : link2Source;
+    var otherMin = link1Self ? link2Min : link1Min;
+    var otherMax = link1Self ? link2Max : link1Max;
+    
+    // If self-link is at the same column as the other link's start or end, it might overlap
+    // But if the other link just starts/ends there without spanning across, it's fine?
+    // Actually, any link spanning across selfCol overlaps the self-link bubble
+    if (selfCol >= otherMin && selfCol <= otherMax) return true;
+  }
+
   // Horizontal ranges overlap significantly (not just touching at boundary)
   // If both links have horizontal segments in the same column range, they would overlap
   var overlapStart = Math.max(link1Min, link2Min);
