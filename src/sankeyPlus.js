@@ -256,18 +256,30 @@ function computeNodeValues(inputGraph) {
       sum(node.sourceLinks, value),
       sum(node.targetLinks, value)
     );
+    
+    // Count circular link types to determine the predominant type
+    var topCount = 0;
+    var bottomCount = 0;
+    
     node.sourceLinks.forEach(function (link) {
       if (link.circular) {
         node.partOfCycle = true;
-        node.circularLinkType = link.circularLinkType;
+        if (link.circularLinkType === "top") topCount++;
+        else if (link.circularLinkType === "bottom") bottomCount++;
       }
     });
     node.targetLinks.forEach(function (link) {
       if (link.circular) {
         node.partOfCycle = true;
-        node.circularLinkType = link.circularLinkType;
+        if (link.circularLinkType === "top") topCount++;
+        else if (link.circularLinkType === "bottom") bottomCount++;
       }
     });
+    
+    // Assign the predominant type (or "top" if equal)
+    if (node.partOfCycle) {
+      node.circularLinkType = topCount >= bottomCount ? "top" : "bottom";
+    }
   });
 
   return graph;
@@ -567,13 +579,26 @@ function computeNodeBreadths() {
             node.y0 = graph.y0 + topCyclesBefore * (node.value * graph.ky + gapPerNode) + cycleInset;
             node.y1 = node.y0 + node.value * graph.ky;
           } else {
-            let maxNonCycleY1 = graph.y0;
+            // Place bottom cycle nodes symmetrically to top cycle nodes
+            // Calculate total height of all top cycles first for proper mirroring
+            let totalTopCyclesHeight = 0;
+            let topCyclesCount = 0;
             nodes.forEach(function(n) {
-              if (!n.partOfCycle && n.y1 !== undefined && n.y1 > maxNonCycleY1) maxNonCycleY1 = n.y1;
+              if (n.partOfCycle && n.circularLinkType == "top" && numberOfNonSelfLinkingCycles(n, id) > 0) {
+                totalTopCyclesHeight += n.value * graph.ky;
+                topCyclesCount++;
+              }
             });
-            if (maxNonCycleY1 === graph.y0) maxNonCycleY1 = graph.y0 + totalNodesHeight + (nodesLength - 1) * gapPerNode;
-            node.y0 = maxNonCycleY1 + gapPerNode + bottomCyclesBefore * (node.value * graph.ky + gapPerNode) + cycleInset;
-            node.y1 = node.y0 + node.value * graph.ky;
+            let totalTopGaps = topCyclesCount > 1 ? gapPerNode * (topCyclesCount - 1) : 0;
+            
+            // Mirror bottom nodes: if top node is at y0, bottom node should be at (graph.y1 - (y0 - graph.y0) - height)
+            // Equivalently: graph.y1 - (topOffset + height) where topOffset is distance from graph.y0
+            let topEquivalentY0 = graph.y0 + bottomCyclesBefore * (node.value * graph.ky + gapPerNode) + cycleInset;
+            let distanceFromTop = topEquivalentY0 - graph.y0;
+            
+            // Mirror it to bottom
+            node.y1 = graph.y1 - distanceFromTop;
+            node.y0 = node.y1 - node.value * graph.ky;
           }
         } else {
           let totalNodesHeight = totalColumnValue * graph.ky;
@@ -1172,6 +1197,15 @@ class SankeyChart {
     
     this.graph = computeNodeBreadths.call(this);
     this.graph = resolveCollisionsAndRelax.call(this);
+    
+    // Recalculate circular link types based on final node positions
+    this.graph = selectCircularLinkTypes(this.graph, this.config.id);
+    // Update node circularLinkType based on predominant link types
+    this.graph = computeNodeValues(this.graph);
+    
+    // Recalculate node positions with updated link types
+    this.graph = computeNodeBreadths.call(this);
+    this.graph = resolveCollisionsAndRelax.call(this);
     this.graph = computeLinkBreadths(this.graph);
 
     this.graph = straigtenVirtualNodes(this.graph);
@@ -1356,10 +1390,20 @@ class SankeyChart {
         const connectedLinkIndices = new Set();
         graphLinks.forEach((link, idx) => {
           // Check both by reference and by name (in case objects differ)
-          const sourceMatch = link.source === d || 
-                             (link.source && link.source.name === d.name);
-          const targetMatch = link.target === d || 
-                             (link.target && link.target.name === d.name);
+          // Also handle the case where source/target are objects with 'index' or 'name' properties
+          // For sankey-plus, source/target are usually node objects
+          
+          let sourceMatch = false;
+          let targetMatch = false;
+          
+          if (link.source === d) sourceMatch = true;
+          else if (link.source && d && link.source.index !== undefined && link.source.index === d.index) sourceMatch = true;
+          else if (link.source && d && link.source.name !== undefined && link.source.name === d.name) sourceMatch = true;
+          
+          if (link.target === d) targetMatch = true;
+          else if (link.target && d && link.target.index !== undefined && link.target.index === d.index) targetMatch = true;
+          else if (link.target && d && link.target.name !== undefined && link.target.name === d.name) targetMatch = true;
+          
           if (sourceMatch || targetMatch) {
             connectedLinkIndices.add(link.index !== undefined ? link.index : idx);
           }
