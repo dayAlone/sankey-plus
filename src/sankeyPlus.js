@@ -1258,6 +1258,30 @@ class SankeyChart {
       this.config.links.verticalMargin
     );
 
+    this.graph = addCircularPathData(
+      this.graph,
+      this.config.id,
+      this.config.links.circularGap,
+      this.config.links.baseRadius,
+      this.config.links.verticalMargin
+    );
+
+    this.graph = adjustGraphExtents(
+      this.graph,
+      this.config.padding,
+      this.config.height,
+      this.config.width,
+      this.config.nodes.width
+    );
+
+    this.graph = addCircularPathData(
+      this.graph,
+      this.config.id,
+      this.config.links.circularGap,
+      this.config.links.baseRadius,
+      this.config.links.verticalMargin
+    );
+
     this.graph = addVirtualPathData(
       this.graph,
       this.config.links.virtualLinkType

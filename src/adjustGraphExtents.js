@@ -11,6 +11,7 @@ export function adjustGraphExtents(
   let chartWidth = svgWidth - chartPadding - chartPadding;
 
   let graph = inputGraph;
+  let originalY0 = graph.y0;
 
   let extentCircularY = [
     min(graph.links, function (link) {
@@ -50,6 +51,24 @@ export function adjustGraphExtents(
       let y0move = min([verticalSpaceTop]);
       graph.y0 = graph.y0 - y0move;
       graph.y1 = graph.y1 - Math.abs(verticalSpaceBottom);
+    }
+    
+    let dy = graph.y0 - originalY0;
+    if (dy !== 0) {
+      graph.nodes.forEach(function (node) {
+        node.y0 += dy;
+        node.y1 += dy;
+      });
+      graph.links.forEach(function (link) {
+        link.y0 += dy;
+        link.y1 += dy;
+      });
+      if (graph.replacedLinks) {
+        graph.replacedLinks.forEach(function (link) {
+          link.y0 += dy;
+          link.y1 += dy;
+        });
+      }
     }
   }
 
