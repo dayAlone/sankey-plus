@@ -319,6 +319,26 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
   // - thin links becoming outermost and entering a node from above.
   Object.values(groups).forEach(function(group) {
     group.sort(function(a, b) {
+      // Keep links targeting the same node together (prevents alternating/braiding between
+      // multiple target nodes in the same column).
+      //
+      // Primary key: target vertical position (y0). This makes all backlinks entering the
+      // upper target node come before those entering a lower target node.
+      // Secondary key (only when y0 is equal): smaller target node first.
+      var aTgtY0 = a.target && typeof a.target.y0 === "number" ? a.target.y0 : 0;
+      var bTgtY0 = b.target && typeof b.target.y0 === "number" ? b.target.y0 : 0;
+      if (Math.abs(aTgtY0 - bTgtY0) >= 1e-6) return aTgtY0 - bTgtY0;
+
+      var aTgtH =
+        a.target && typeof a.target.y1 === "number" && typeof a.target.y0 === "number"
+          ? a.target.y1 - a.target.y0
+          : 0;
+      var bTgtH =
+        b.target && typeof b.target.y1 === "number" && typeof b.target.y0 === "number"
+          ? b.target.y1 - b.target.y0
+          : 0;
+      if (aTgtH !== bTgtH) return aTgtH - bTgtH; // smaller target first
+
       var aSelf = selfLinking(a, id);
       var bSelf = selfLinking(b, id);
       if (aSelf !== bSelf) return aSelf ? 1 : -1;
@@ -326,27 +346,6 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
       var distA = Math.abs(a.source.column - a.target.column);
       var distB = Math.abs(b.source.column - b.target.column);
       if (distA !== distB) return distA - distB;
-
-      // If two target nodes start at the same vertical position, prefer putting
-      // backlinks for the SMALLER target node first (lower/inner), and larger
-      // target node later (higher/outer). This helps when a tiny node sits next
-      // to a tall node at the same y0: we want the tiny-node bundle to stay
-      // closer to the node (below the tall-node bundle) instead of being lifted.
-      // Keep this rule extremely conservative to avoid broad re-ordering:
-      // apply it only when target.y0 is effectively equal.
-      var aTgtY0 = a.target && typeof a.target.y0 === "number" ? a.target.y0 : 0;
-      var bTgtY0 = b.target && typeof b.target.y0 === "number" ? b.target.y0 : 0;
-      if (Math.abs(aTgtY0 - bTgtY0) < 1e-6) {
-        var aTgtH =
-          a.target && typeof a.target.y1 === "number" && typeof a.target.y0 === "number"
-            ? a.target.y1 - a.target.y0
-            : 0;
-        var bTgtH =
-          b.target && typeof b.target.y1 === "number" && typeof b.target.y0 === "number"
-            ? b.target.y1 - b.target.y0
-            : 0;
-        if (aTgtH !== bTgtH) return aTgtH - bTgtH; // smaller target first
-      }
 
       // Stable-ish tie-breakers to reduce jitter between reruns
       var aSrcY = (a.source.y0 + a.source.y1) / 2;
