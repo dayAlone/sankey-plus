@@ -441,6 +441,13 @@ export function sortTargetLinks(inputGraph, id) {
           var l2Self = selfLinking(link2, id);
           if (l1Self !== l2Self) return l1Self ? 1 : -1;
 
+          // For TARGET-side ordering (y1), the most important thing for readability is that
+          // incoming circular links are ordered consistently with their sources (prevents
+          // near-node crossings and the "braid" effect). So use sourceY as the primary key.
+          var s1 = (link1.source.y0 + link1.source.y1) / 2;
+          var s2 = (link2.source.y0 + link2.source.y1) / 2;
+          if (s1 !== s2) return s1 - s2;
+
           var d1 = Math.abs(link1.target.column - link1.source.column);
           var d2 = Math.abs(link2.target.column - link2.source.column);
           if (d1 !== d2) {
@@ -452,9 +459,6 @@ export function sortTargetLinks(inputGraph, id) {
           var w2 = link2.width || 0;
           if (w1 !== w2) return w1 - w2;
 
-          var s1 = (link1.source.y0 + link1.source.y1) / 2;
-          var s2 = (link2.source.y0 + link2.source.y1) / 2;
-          if (s1 !== s2) return s1 - s2;
           return (link1.index || 0) - (link2.index || 0);
         }
       });
