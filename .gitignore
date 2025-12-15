@@ -109,3 +109,6 @@ typings/
 
 # Local debug pages (keep local, never commit)
 *debug*.html
+
+# HTML pages containing booking-related debug/fixtures (purged from repo history)
+test-height.html
