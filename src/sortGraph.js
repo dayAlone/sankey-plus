@@ -291,10 +291,11 @@ export function sortSourceLinks(inputGraph, id) {
           var d1 = Math.abs(link1.target.column - link1.source.column);
           var d2 = Math.abs(link2.target.column - link2.source.column);
           if (d1 !== d2) {
-            // For bottom circular links, prefer longer spans to occupy higher slots on the node
-            // (reduces crossings with short/local loops). For top links keep shorter first.
-            if (link1.circularLinkType === 'bottom') return d2 - d1;
-            return d1 - d2;
+            // SOURCE-side ordering for circular links:
+            // - TOP: longer spans should exit higher (outer arcs go above inner arcs)
+            // - BOTTOM: longer spans should also occupy higher slots to reduce near-node crossings
+            // This keeps the order consistent with radii nesting (outer = longer span = should be higher).
+            return d2 - d1;
           }
 
           var w1 = link1.width || 0;
