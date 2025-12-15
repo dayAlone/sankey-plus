@@ -445,16 +445,12 @@ export function sortTargetLinks(inputGraph, id) {
           var d2 = Math.abs(link2.target.column - link2.source.column);
           if (d1 !== d2) {
             // TARGET-side ordering for circular links should primarily reflect distance
-            // to the source node, to get clean nesting ("outer" encloses "inner"):
-            // - TOP: farther links are outer and should enter higher -> distance DESC
-            // - BOTTOM: farther links are outer and should enter lower -> distance ASC
-            if (link1.circularLinkType === 'bottom') return d1 - d2;
-            return d2 - d1;
+            // to the source node, but for readability at the target node we want the
+            // farthest backlinks to enter LOWEST (closest to node bottom) so they don't
+            // "sit on top" of all other incoming backlinks.
+            // Therefore: distance ASC for both TOP and BOTTOM.
+            return d1 - d2;
           }
-
-          var w1 = link1.width || 0;
-          var w2 = link2.width || 0;
-          if (w1 !== w2) return w1 - w2;
 
           // If sources are in the same column, keep their vertical order for readability.
           if (link1.source.column === link2.source.column) {
@@ -462,6 +458,10 @@ export function sortTargetLinks(inputGraph, id) {
             var s2 = (link2.source.y0 + link2.source.y1) / 2;
             if (s1 !== s2) return s1 - s2;
           }
+
+          var w1 = link1.width || 0;
+          var w2 = link2.width || 0;
+          if (w1 !== w2) return w1 - w2;
 
           return (link1.index || 0) - (link2.index || 0);
         }
