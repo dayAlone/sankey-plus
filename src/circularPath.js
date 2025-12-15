@@ -264,16 +264,15 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
     });
   });
 
-  // Order groups to minimize crossings: groups with more links first,
-  // then by average distance, then by column index
+  // Order groups to minimize crossings:
+  // - Prefer groups with smaller average span first (inner)
+  // - Larger-span groups later (outer)
+  // This avoids the case where a long-span link is processed too early and ends up "inner",
+  // causing it to cross the vertical legs of shorter links from the same source.
   var orderedGroups = Object.keys(groups)
     .map(function(col) { return { col: +col, links: groups[col] }; })
     .sort(function(a, b) {
-      // More links first (bigger groups get priority)
-      if (a.links.length !== b.links.length) {
-        return b.links.length - a.links.length;
-      }
-      // Then by average distance ascending
+      // Average span ascending
       var avgDistA = a.links.reduce(function(sum, l) {
         return sum + Math.abs(l.source.column - l.target.column);
       }, 0) / a.links.length;
@@ -282,6 +281,10 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
       }, 0) / b.links.length;
       if (avgDistA !== avgDistB) {
         return avgDistA - avgDistB;
+      }
+      // Then bigger groups first (stable packing)
+      if (a.links.length !== b.links.length) {
+        return b.links.length - a.links.length;
       }
       // Finally by column index
       return a.col - b.col;
@@ -449,6 +452,11 @@ function circularLinksActuallyCross(link1, link2) {
   // Same TARGET column = left vertical segments would overlap at target
   // This includes same-source-same-target links
   if (sameTarget) return true;
+
+  // Same SOURCE column = right vertical segments overlap at source.
+  // If we don't stack these, the "legs" of a shorter link can intersect the horizontal
+  // segment of a longer link when their spans overlap. Force stacking.
+  if (sameSource) return true;
   
   // Boundary touching: one link's target = other link's source (verticals at same column)
   if (link1Target === link2Source || link1Source === link2Target) return true;
