@@ -727,8 +727,14 @@ function computeNodeBreadths() {
             let topEquivalentY0 = graph.y0 + bottomCyclesBefore * (node.value * graph.ky + gapPerNode) + cycleInset;
             let distanceFromTop = topEquivalentY0 - graph.y0;
             
+            // Add extra inset for bottom nodes to bring them closer to center (visual balance)
+            // Use 25% of available height as bottom margin
+            let bottomInset = (graph.y1 - graph.y0) * 0.25;
+            
+            // console.log(`Bottom node ${node.name}: inset=${bottomInset}, y1_target=${(graph.y1 - bottomInset) - distanceFromTop}`);
+
             // Mirror it to bottom
-            node.y1 = graph.y1 - distanceFromTop;
+            node.y1 = (graph.y1 - bottomInset) - distanceFromTop;
             node.y0 = node.y1 - node.value * graph.ky;
           }
         } else {
