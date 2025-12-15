@@ -265,8 +265,11 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
                          link.source.name === links[j].target.name ||
                          link.target.name === links[j].source.name ||
                          link.target.name === links[j].target.name);
-          // Use no gap for links at the same node, full gap otherwise
-          var gap = sameNode ? 0 : circularLinkGap;
+          // Use no gap ONLY if one of them is a self-link AND they share a node
+          var gap = circularLinkGap;
+          if ((selfLinking(link, id) || selfLinking(links[j], id)) && sameNode) {
+            gap = 0;
+          }
           
           var bufferOverThisLink =
             links[j].circularPathData.verticalBuffer +
@@ -300,8 +303,11 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
                          link.source.name === links[j].target.name ||
                          link.target.name === links[j].source.name ||
                          link.target.name === links[j].target.name);
-          // Use no gap for links at the same node, full gap otherwise
-          var gap = sameNode ? 0 : circularLinkGap;
+          // Use no gap ONLY if one of them is a self-link AND they share a node
+          var gap = circularLinkGap;
+          if ((selfLinking(link, id) || selfLinking(links[j], id)) && sameNode) {
+            gap = 0;
+          }
           
           var bufferOverThisLink =
             links[j].circularPathData.verticalBuffer +
