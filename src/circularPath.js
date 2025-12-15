@@ -197,29 +197,6 @@ export function addCircularPathData(
           radiusOffset = radiusOffset + l.width;
         });
 
-        // Clamp the SOURCE-side (right) large arc radius for TOP circular links.
-        //
-        // Motivation: when a source column has many circular links, rightLargeArcRadius can
-        // become extremely large (e.g. A91...), even though the corresponding target-side
-        // (left) radius for the same link is much smaller. This produces visually "ballooned"
-        // top arcs on the right. For these cases, make the right radius match the left radius
-        // for the same link.
-        if (
-          link.circularLinkType === "top" &&
-          link.circularPathData &&
-          typeof link.circularPathData.rightLargeArcRadius === "number" &&
-          typeof link.circularPathData.leftLargeArcRadius === "number" &&
-          link.circularPathData.rightLargeArcRadius > link.circularPathData.leftLargeArcRadius
-        ) {
-          link.circularPathData.rightLargeArcRadius = link.circularPathData.leftLargeArcRadius;
-          if (
-            typeof link.circularPathData.rightSmallArcRadius === "number" &&
-            link.circularPathData.rightSmallArcRadius > link.circularPathData.rightLargeArcRadius
-          ) {
-            link.circularPathData.rightSmallArcRadius = link.circularPathData.rightLargeArcRadius;
-          }
-        }
-
         // Use shared group extents computed in calcVerticalBuffer to keep bundles aligned.
         // Prefer per-link extents for compact routing when the link is "local":
         // - same-column circular links (source.column === target.column),
@@ -332,6 +309,59 @@ export function addCircularPathData(
         });
       link.path = normalPath(link);
     }
+  });
+
+  // Post-pass: compress overly-large RIGHT-side radii for TOP circular links, per source column.
+  //
+  // Why: per-column radii spacing is what prevents right vertical legs from overlapping.
+  // A hard clamp to leftLargeArcRadius can collapse those radii (causing overlaps), while
+  // no clamp can produce ballooned radii (A91...). So we keep per-column spacing but, if
+  // the whole group becomes too large, scale the radii down proportionally.
+  var rightTopGroups = {};
+  graph.links.forEach(function(l) {
+    if (!l.circular || l.circularLinkType !== "top") return;
+    if (selfLinking(l, id)) return;
+    if (!l.source || typeof l.source.column !== "number") return;
+    if (!l.circularPathData || typeof l.circularPathData.rightLargeArcRadius !== "number") return;
+    var key = String(l.source.column);
+    if (!rightTopGroups[key]) rightTopGroups[key] = [];
+    rightTopGroups[key].push(l);
+  });
+
+  var diagramWidth = graph.x1 - graph.x0;
+  var maxAllowedRightRadius = Math.max(baseRadius + 30, diagramWidth * 0.05);
+
+  Object.keys(rightTopGroups).forEach(function(key) {
+    var group = rightTopGroups[key];
+    var maxR = 0;
+    group.forEach(function(l) {
+      var r = l.circularPathData.rightLargeArcRadius;
+      if (r > maxR) maxR = r;
+    });
+    if (maxR <= maxAllowedRightRadius) return;
+
+    var denom = (maxR - baseRadius);
+    if (denom <= 1e-6) return;
+    var factor = (maxAllowedRightRadius - baseRadius) / denom;
+    // Don't over-compress; keep some spacing even in worst cases.
+    factor = Math.max(0.5, Math.min(1, factor));
+
+    group.forEach(function(l) {
+      var c = l.circularPathData;
+      if (typeof c.rightLargeArcRadius === "number") {
+        c.rightLargeArcRadius = baseRadius + (c.rightLargeArcRadius - baseRadius) * factor;
+      }
+      if (typeof c.rightSmallArcRadius === "number") {
+        c.rightSmallArcRadius = baseRadius + (c.rightSmallArcRadius - baseRadius) * factor;
+      }
+      if (
+        typeof c.rightLargeArcRadius === "number" &&
+        typeof c.rightSmallArcRadius === "number" &&
+        c.rightSmallArcRadius > c.rightLargeArcRadius
+      ) {
+        c.rightSmallArcRadius = c.rightLargeArcRadius;
+      }
+    });
   });
 
   return graph;
