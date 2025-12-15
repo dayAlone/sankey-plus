@@ -1,5 +1,5 @@
 import { getNodeID } from "./nodeAttributes.js";
-import { linkPerpendicularYToLinkSource, linkPerpendicularYToLinkTarget } from "./linkAttributes.js";
+import { linkPerpendicularYToLinkSource, linkPerpendicularYToLinkTarget, selfLinking } from "./linkAttributes.js";
 
 
 // sort ascending links by their source vertical position, y0
@@ -275,34 +275,31 @@ export function sortSourceLinks(inputGraph, id) {
 
         // if both links are circular...
         if (link1.circular && link2.circular) {
-          // ...and they both loop the same way (both top)
-          if (
-            link1.circularLinkType === link2.circularLinkType &&
-            link1.circularLinkType == 'top'
-          ) {
-            // ...and they both connect to a target with same column, then sort by the target's y
-            if (link1.target.column === link2.target.column) {
-              return link1.target.y1 - link2.target.y1;
-            } else {
-              // ...and they connect to different column targets, then sort by how far back they
-              return link2.target.column - link1.target.column;
-            }
-          } else if (
-            link1.circularLinkType === link2.circularLinkType &&
-            link1.circularLinkType == 'bottom'
-          ) {
-            // ...and they both loop the same way (both bottom)
-            // ...and they both connect to a target with same column, then sort by the target's y
-            if (link1.target.column === link2.target.column) {
-              return link1.target.y1 - link2.target.y1;
-            } else {
-              // ...and they connect to different column targets, then sort by how far back they
-              return link1.target.column - link2.target.column;
-            }
-          } else {
-            // ...and they loop around different ways, the move top up and bottom down
-            return link1.circularLinkType == 'top' ? -1 : 1;
+          // Different loop sides: keep TOP above BOTTOM.
+          if (link1.circularLinkType !== link2.circularLinkType) {
+            return link1.circularLinkType === 'top' ? -1 : 1;
           }
+
+          // Same loop side: enforce consistent ordering.
+          // - self-links last (so they don't steal the "inner" slot on the node)
+          // - shortest span first (inner)
+          // - thinner first (inner), thicker last (outer)
+          var l1Self = selfLinking(link1, id);
+          var l2Self = selfLinking(link2, id);
+          if (l1Self !== l2Self) return l1Self ? 1 : -1;
+
+          var d1 = Math.abs(link1.target.column - link1.source.column);
+          var d2 = Math.abs(link2.target.column - link2.source.column);
+          if (d1 !== d2) return d1 - d2;
+
+          var w1 = link1.width || 0;
+          var w2 = link2.width || 0;
+          if (w1 !== w2) return w1 - w2;
+
+          var t1 = (link1.target.y0 + link1.target.y1) / 2;
+          var t2 = (link2.target.y0 + link2.target.y1) / 2;
+          if (t1 !== t2) return t1 - t2;
+          return (link1.index || 0) - (link2.index || 0);
         }
       });
     }
@@ -429,34 +426,28 @@ export function sortTargetLinks(inputGraph, id) {
 
         // if both links are circular...
         if (link1.circular && link2.circular) {
-          // ...and they both loop the same way (both top)
-          if (
-            link1.circularLinkType === link2.circularLinkType &&
-            link1.circularLinkType == 'top'
-          ) {
-            // ...and they both connect to a target with same column, then sort by the target's y
-            if (link1.source.column === link2.source.column) {
-              return link1.source.y1 - link2.source.y1;
-            } else {
-              // ...and they connect to different column targets, then sort by how far back they
-              return link1.source.column - link2.source.column;
-            }
-          } else if (
-            link1.circularLinkType === link2.circularLinkType &&
-            link1.circularLinkType == 'bottom'
-          ) {
-            // ...and they both loop the same way (both bottom)
-            // ...and they both connect to a target with same column, then sort by the target's y
-            if (link1.source.column === link2.source.column) {
-              return link1.source.y1 - link2.source.y1;
-            } else {
-              // ...and they connect to different column targets, then sort by how far back they
-              return link2.source.column - link1.source.column;
-            }
-          } else {
-            // ...and they loop around different ways, the move top up and bottom down
-            return link1.circularLinkType == 'top' ? -1 : 1;
+          // Different loop sides: keep TOP above BOTTOM.
+          if (link1.circularLinkType !== link2.circularLinkType) {
+            return link1.circularLinkType === 'top' ? -1 : 1;
           }
+
+          // Same loop side: same ordering policy as in sortSourceLinks.
+          var l1Self = selfLinking(link1, id);
+          var l2Self = selfLinking(link2, id);
+          if (l1Self !== l2Self) return l1Self ? 1 : -1;
+
+          var d1 = Math.abs(link1.target.column - link1.source.column);
+          var d2 = Math.abs(link2.target.column - link2.source.column);
+          if (d1 !== d2) return d1 - d2;
+
+          var w1 = link1.width || 0;
+          var w2 = link2.width || 0;
+          if (w1 !== w2) return w1 - w2;
+
+          var s1 = (link1.source.y0 + link1.source.y1) / 2;
+          var s2 = (link2.source.y0 + link2.source.y1) / 2;
+          if (s1 !== s2) return s1 - s2;
+          return (link1.index || 0) - (link2.index || 0);
         }
       });
     }
