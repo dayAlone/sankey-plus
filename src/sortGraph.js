@@ -448,8 +448,8 @@ export function sortTargetLinks(inputGraph, id) {
             // distance to the source node:
             // - TOP: farther links are "outer" and should enter higher -> distance DESC
             // - BOTTOM: farther links are "outer" and should enter lower -> distance ASC
-            if (link1.circularLinkType === 'bottom') return d2 - d1;
-            return d1 - d2;
+            if (link1.circularLinkType === 'bottom') return d1 - d2;
+            return d2 - d1;
           }
 
           // If sources are in the same column, keep their vertical order for readability.
