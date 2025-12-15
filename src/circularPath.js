@@ -516,6 +516,25 @@ function circularLinksActuallyCross(link1, link2) {
   var link2Source = link2.source.column;
   var link2Target = link2.target.column;
   
+  // Special case: "zero-span" (source.column === target.column) but NOT self-link
+  // (source node !== target node). These are very compact local loops and should
+  // NOT be forced to stack against every link whose column-range includes this column.
+  // They only need stacking against links that actually start/end in this column
+  // (i.e. could share the same vertical leg region).
+  var link1ZeroSpanNonSelf =
+    link1Source === link1Target && link1.source !== link1.target;
+  var link2ZeroSpanNonSelf =
+    link2Source === link2Target && link2.source !== link2.target;
+
+  if (link1ZeroSpanNonSelf) {
+    var col = link1Source;
+    if (!(link2Source === col || link2Target === col)) return false;
+  }
+  if (link2ZeroSpanNonSelf) {
+    var col2 = link2Source;
+    if (!(link1Source === col2 || link1Target === col2)) return false;
+  }
+
   // Calculate horizontal ranges
   var link1Min = Math.min(link1Source, link1Target);
   var link1Max = Math.max(link1Source, link1Target);
