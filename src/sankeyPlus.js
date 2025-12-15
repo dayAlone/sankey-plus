@@ -338,7 +338,9 @@ function selectCircularLinkTypes(inputGraph, id) {
       var targetNode = linksToTarget[0].target;
       if (!targetNode || typeof targetNode.y0 !== "number") return;
 
-      // Headroom above the target node (approx) – if stack exceeds this, outer links will escape far upward.
+      // Headroom above the target node (approx). In some layouts `graph.y0` may be shifted down
+      // by extents adjustment, making headroom close to 0 even when the SVG has plenty of space.
+      // Treat very small headroom as "congested" and allow offloading some links to bottom.
       var headroom = Math.max(0, targetNode.y0 - graph.y0);
 
       // Estimate stack height using link widths (dominant term). We don't have circularGap here,
@@ -346,7 +348,9 @@ function selectCircularLinkTypes(inputGraph, id) {
       var estimatedStack = linksToTarget.reduce((s, l) => s + (l.width || 0), 0) + (linksToTarget.length - 1) * 2;
 
       // If stack is too tall relative to headroom, move some thick outer links to bottom.
-      if (headroom > 0 && estimatedStack > headroom * 0.9) {
+      // Also if headroom is ~0, we still offload, otherwise some links can be forced extremely high.
+      var headroomLimit = Math.max(headroom * 0.9, 20); // 20px minimum allowance
+      if (estimatedStack > headroomLimit) {
         // Prefer moving thick / long-span links first – they reduce stack height the most.
         var candidates = linksToTarget
           .slice()
@@ -361,7 +365,7 @@ function selectCircularLinkTypes(inputGraph, id) {
 
         var remaining = estimatedStack;
         for (var k = 0; k < candidates.length; k++) {
-          if (remaining <= headroom * 0.9) break;
+          if (remaining <= headroomLimit) break;
           var lnk = candidates[k];
           // Move to bottom and mark as forced so later passes won't flip it back.
           lnk.circularLinkType = "bottom";
