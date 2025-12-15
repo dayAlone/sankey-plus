@@ -290,7 +290,12 @@ export function sortSourceLinks(inputGraph, id) {
 
           var d1 = Math.abs(link1.target.column - link1.source.column);
           var d2 = Math.abs(link2.target.column - link2.source.column);
-          if (d1 !== d2) return d1 - d2;
+          if (d1 !== d2) {
+            // For bottom circular links, prefer longer spans to occupy higher slots on the node
+            // (reduces crossings with short/local loops). For top links keep shorter first.
+            if (link1.circularLinkType === 'bottom') return d2 - d1;
+            return d1 - d2;
+          }
 
           var w1 = link1.width || 0;
           var w2 = link2.width || 0;
@@ -438,7 +443,10 @@ export function sortTargetLinks(inputGraph, id) {
 
           var d1 = Math.abs(link1.target.column - link1.source.column);
           var d2 = Math.abs(link2.target.column - link2.source.column);
-          if (d1 !== d2) return d1 - d2;
+          if (d1 !== d2) {
+            if (link1.circularLinkType === 'bottom') return d2 - d1;
+            return d1 - d2;
+          }
 
           var w1 = link1.width || 0;
           var w2 = link2.width || 0;

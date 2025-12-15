@@ -145,14 +145,17 @@ export function addCircularPathData(
         });
 
         // Use shared group extents computed in calcVerticalBuffer to keep bundles aligned.
-        // BUT: for same-column circular links (source.column === target.column) we want a compact loop
-        // around the two nodes, not an arc sized by the entire column bundle. So for same-column links
-        // we always prefer per-link extents.
+        // Prefer per-link extents for compact routing when the link is "local":
+        // - same-column circular links (source.column === target.column),
+        // - very short-span links (span <= 1).
+        // Otherwise, use group extents to keep bundles aligned.
         var sameColumnCircular = link.source && link.target && link.source.column === link.target.column;
+        var span = Math.abs((link.source.column || 0) - (link.target.column || 0));
+        var preferPerLinkExtents = sameColumnCircular || span <= 1;
         var relevantMinY;
         var relevantMaxY;
 
-        if (sameColumnCircular && link.circularPathData) {
+        if (preferPerLinkExtents && link.circularPathData) {
           if (typeof link.circularPathData._extMinY === "number") {
             relevantMinY = link.circularPathData._extMinY;
           }
@@ -281,7 +284,8 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
 
   // Sort within each group (same target column) so that:
   // - self-links (distance 0) come LAST (outer) relative to other links,
-  // - for equal span, thinner links come first (inner) and thicker links come last (outer).
+  // - for equal span, order by source vertical position (upper first),
+  // - then thinner first as a stable tie-break.
   // This helps avoid:
   // - non-self backlinks being pushed below self-loops,
   // - crossings between same-span links,
@@ -296,14 +300,15 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
       var distB = Math.abs(b.source.column - b.target.column);
       if (distA !== distB) return distA - distB;
 
-      var aw = a.width || 0;
-      var bw = b.width || 0;
-      if (aw !== bw) return aw - bw; // thinner first (inner), thicker last (outer)
-
       // Stable-ish tie-breakers to reduce jitter between reruns
       var aSrcY = (a.source.y0 + a.source.y1) / 2;
       var bSrcY = (b.source.y0 + b.source.y1) / 2;
       if (aSrcY !== bSrcY) return aSrcY - bSrcY;
+
+      var aw = a.width || 0;
+      var bw = b.width || 0;
+      if (aw !== bw) return aw - bw; // thinner first
+
       return (a.circularLinkID || 0) - (b.circularLinkID || 0) || a.index - b.index;
     });
   });
@@ -403,15 +408,18 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
             prevLink.width / 2 +
             gap;
             
-          // Use same offset correction logic as for regular links
+          // Offset correction helps reduce "holes", but must NOT eliminate circularGap
+          // for links targeting the same column/bundle.
           var thisBaseY = link.circularPathData.baseY;
           var prevBaseY = prevLink.circularPathData.baseY;
           var offsetCorrection = 0;
           
-          if (link.circularLinkType === "bottom") {
-             offsetCorrection = prevBaseY - thisBaseY;
-          } else {
-             offsetCorrection = thisBaseY - prevBaseY;
+          if (link.target.column !== prevLink.target.column) {
+            if (link.circularLinkType === "bottom") {
+              offsetCorrection = prevBaseY - thisBaseY;
+            } else {
+              offsetCorrection = thisBaseY - prevBaseY;
+            }
           }
           
           bufferOverThisLink += offsetCorrection;
@@ -462,14 +470,17 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
           var prevBaseY = prevLink.circularPathData.baseY;
           var offsetCorrection = 0;
           
-          if (link.circularLinkType === "bottom") {
-             // For bottom links (curve down), if this link is naturally lower (larger BaseY)
-             // than the previous link, we need less buffer.
-             offsetCorrection = prevBaseY - thisBaseY;
-          } else {
-             // For top links (curve up), if this link is naturally higher (smaller BaseY)
-             // than the previous link, we need less buffer.
-             offsetCorrection = thisBaseY - prevBaseY;
+          // Do not reduce spacing for the same target-column bundle (keeps circularGap)
+          if (link.target.column !== prevLink.target.column) {
+            if (link.circularLinkType === "bottom") {
+              // For bottom links (curve down), if this link is naturally lower (larger BaseY)
+              // than the previous link, we need less buffer.
+              offsetCorrection = prevBaseY - thisBaseY;
+            } else {
+              // For top links (curve up), if this link is naturally higher (smaller BaseY)
+              // than the previous link, we need less buffer.
+              offsetCorrection = thisBaseY - prevBaseY;
+            }
           }
           
           bufferOverThisLink += offsetCorrection;
