@@ -97,11 +97,14 @@ export function addCircularPathData(
           );
         });
 
-        if (link.circularLinkType == "bottom") {
-          sameColumnLinks.sort(sortLinkSourceYDescending);
-        } else {
-          sameColumnLinks.sort(sortLinkSourceYAscending);
-        }
+        // Make arc radii consistent with stacking order:
+        // inner (smaller verticalBuffer) first, outer (larger verticalBuffer) last.
+        sameColumnLinks.sort(function(a, b) {
+          var av = a.circularPathData ? a.circularPathData.verticalBuffer : 0;
+          var bv = b.circularPathData ? b.circularPathData.verticalBuffer : 0;
+          if (av !== bv) return av - bv;
+          return a.circularLinkID - b.circularLinkID;
+        });
 
         var radiusOffset = 0;
         sameColumnLinks.forEach(function (l, i) {
@@ -122,11 +125,13 @@ export function addCircularPathData(
             l.circularLinkType == thisCircularLinkType
           );
         });
-        if (link.circularLinkType == "bottom") {
-          sameColumnLinks.sort(sortLinkTargetYDescending);
-        } else {
-          sameColumnLinks.sort(sortLinkTargetYAscending);
-        }
+        // Same for target side radii: keep consistent with verticalBuffer stacking.
+        sameColumnLinks.sort(function(a, b) {
+          var av = a.circularPathData ? a.circularPathData.verticalBuffer : 0;
+          var bv = b.circularPathData ? b.circularPathData.verticalBuffer : 0;
+          if (av !== bv) return av - bv;
+          return a.circularLinkID - b.circularLinkID;
+        });
 
         radiusOffset = 0;
         sameColumnLinks.forEach(function (l, i) {
@@ -139,25 +144,16 @@ export function addCircularPathData(
           radiusOffset = radiusOffset + l.width;
         });
 
-        // Find min/max Y of REAL nodes between source and target columns
-        // Exclude virtual nodes
-        var relevantMinY = Math.min(link.source.y0, link.target.y0);
-        var relevantMaxY = Math.max(link.source.y1, link.target.y1);
-        
-        graph.nodes.forEach(function(node) {
-          if (node.virtual || (node.name && node.name.indexOf('virtualNode') === 0)) {
-            return;
-          }
-          if (node.column >= Math.min(link.source.column, link.target.column) && 
-              node.column <= Math.max(link.source.column, link.target.column)) {
-            if (node.y0 < relevantMinY) relevantMinY = node.y0;
-            if (node.y1 > relevantMaxY) relevantMaxY = node.y1;
-          }
-        });
+        // Use shared group extents computed in calcVerticalBuffer to keep bundles aligned.
+        // Fallback to per-link extents if group values are missing.
+        var relevantMinY = (link.circularPathData && typeof link.circularPathData.groupMinY === "number")
+          ? link.circularPathData.groupMinY
+          : Math.min(link.source.y0, link.target.y0);
+        var relevantMaxY = (link.circularPathData && typeof link.circularPathData.groupMaxY === "number")
+          ? link.circularPathData.groupMaxY
+          : Math.max(link.source.y1, link.target.y1);
 
         // Base offset controls how far the circular link "escapes" above/below the main diagram.
-        // If it can grow too large, we create visible "holes" (big empty bands) between stacks.
-        // If it's clamped too small, big stacks can't escape above SVG and end up inside the chart.
         // Use an adaptive value, but cap it to a modest fraction of the diagram height.
         var columnHeight = relevantMaxY - relevantMinY;
         var desiredBaseOffset = Math.max(verticalMargin + link.width + 10, columnHeight * 0.25);
@@ -229,7 +225,10 @@ export function addCircularPathData(
 function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
   // Pre-calculate base Y for each link to optimize collision logic
   links.forEach(function(link) {
-    link.circularPathData.baseY = getLinkBaseY(link, nodes, link.circularLinkType);
+    var ext = getLinkBaseExtents(link, nodes);
+    link.circularPathData._extMinY = ext.minY;
+    link.circularPathData._extMaxY = ext.maxY;
+    link.circularPathData.baseY = link.circularLinkType === "bottom" ? ext.maxY : ext.minY;
   });
 
   // Pre-calculate max span for each target column (for group ordering)
@@ -266,6 +265,27 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
       var distA = Math.abs(a.source.column - a.target.column);
       var distB = Math.abs(b.source.column - b.target.column);
       return distA - distB;
+    });
+  });
+
+  // For each group, compute shared minY/maxY across all links in the group.
+  // This makes links targeting the same column align to the same baseline/ceiling,
+  // so the "bundle" looks coherent and avoids one link not reaching another's height.
+  Object.values(groups).forEach(function(group) {
+    var groupMinY = Infinity;
+    var groupMaxY = -Infinity;
+    group.forEach(function(l) {
+      if (l.circularPathData && typeof l.circularPathData._extMinY === "number") {
+        groupMinY = Math.min(groupMinY, l.circularPathData._extMinY);
+      }
+      if (l.circularPathData && typeof l.circularPathData._extMaxY === "number") {
+        groupMaxY = Math.max(groupMaxY, l.circularPathData._extMaxY);
+      }
+    });
+    // Attach group extents to each link
+    group.forEach(function(l) {
+      l.circularPathData.groupMinY = groupMinY;
+      l.circularPathData.groupMaxY = groupMaxY;
     });
   });
 
@@ -696,4 +716,23 @@ function getLinkBaseY(link, nodes, type) {
   });
   
   return type === "bottom" ? relevantMaxY : relevantMinY;
+}
+
+// Returns both minY and maxY extents of REAL nodes in the link's spanned columns.
+function getLinkBaseExtents(link, nodes) {
+  var relevantMinY = Math.min(link.source.y0, link.target.y0);
+  var relevantMaxY = Math.max(link.source.y1, link.target.y1);
+
+  nodes.forEach(function(node) {
+    if (node.virtual || (node.name && node.name.indexOf('virtualNode') === 0)) {
+      return;
+    }
+    if (node.column >= Math.min(link.source.column, link.target.column) && 
+        node.column <= Math.max(link.source.column, link.target.column)) {
+      if (node.y0 < relevantMinY) relevantMinY = node.y0;
+      if (node.y1 > relevantMaxY) relevantMaxY = node.y1;
+    }
+  });
+
+  return { minY: relevantMinY, maxY: relevantMaxY };
 }
