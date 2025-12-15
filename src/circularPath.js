@@ -156,13 +156,13 @@ export function addCircularPathData(
         });
 
         // Base offset controls how far the circular link "escapes" above/below the main diagram.
-        // The previous implementation effectively clamped baseOffset to verticalMargin, which made
-        // it impossible for large stacks of backlinks to rise above the SVG top (or below bottom).
-        // Make it adaptive based on spanned column height and link thickness, with a sane cap.
+        // If it can grow too large, we create visible "holes" (big empty bands) between stacks.
+        // If it's clamped too small, big stacks can't escape above SVG and end up inside the chart.
+        // Use an adaptive value, but cap it to a modest fraction of the diagram height.
         var columnHeight = relevantMaxY - relevantMinY;
         var desiredBaseOffset = Math.max(verticalMargin + link.width + 10, columnHeight * 0.25);
-        // Cap so we don't blow up for extreme diagrams, but still allow escaping the viewport.
-        var maxAllowedBaseOffset = Math.max(verticalMargin, (graph.y1 - graph.y0) * 0.8);
+        // Modest cap (~15% of diagram height) to avoid huge gaps while still allowing escape.
+        var maxAllowedBaseOffset = Math.max(verticalMargin, (graph.y1 - graph.y0) * 0.15);
         var baseOffset = Math.min(desiredBaseOffset, maxAllowedBaseOffset);
         var totalOffset = baseOffset + link.circularPathData.verticalBuffer;
 
