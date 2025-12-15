@@ -454,6 +454,13 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
   // Using MAX span (rather than average) ensures that a group containing any long backlink
   // is treated as "outer" overall, preventing that long backlink from being forced inner
   // relative to shorter-span links from other groups.
+  //
+  // Additional TOP-only tie-breaker:
+  // When two target columns sit on the same row (same min target.y0), process the column
+  // whose top-most target node is SMALLER (smaller height) first. Earlier processing =>
+  // smaller verticalBuffer => TOP arcs stay closer to nodes. This fixes the case where a
+  // tiny node (e.g. `saved_filters_search ●`) shares y0 with a tall neighbor (e.g. `search ●`)
+  // but its backlinks end up above due to group-size sorting.
   var orderedGroups = Object.keys(groups)
     .map(function(col) { return { col: +col, links: groups[col] }; })
     .sort(function(a, b) {
@@ -469,6 +476,36 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
         if (d > maxDistB) maxDistB = d;
       });
       if (maxDistA !== maxDistB) return maxDistA - maxDistB;
+
+      // TOP-only: if min target.y0 is the same, prefer smaller target height first.
+      // NOTE: We compute this on the fly to avoid mutating group state.
+      if (a.links.length && a.links[0].circularLinkType === "top") {
+        function groupMinTargetY0AndHeight(links) {
+          var minY0 = Infinity;
+          var minHAtMinY0 = Infinity;
+          links.forEach(function(l) {
+            var t = l.target;
+            if (!t || typeof t.y0 !== "number" || typeof t.y1 !== "number") return;
+            var y0 = t.y0;
+            var h = t.y1 - t.y0;
+            if (y0 < minY0 - 1e-6) {
+              minY0 = y0;
+              minHAtMinY0 = h;
+            } else if (Math.abs(y0 - minY0) < 1e-6) {
+              minHAtMinY0 = Math.min(minHAtMinY0, h);
+            }
+          });
+          if (minY0 === Infinity) minY0 = 0;
+          if (minHAtMinY0 === Infinity) minHAtMinY0 = 0;
+          return { minY0: minY0, minHAtMinY0: minHAtMinY0 };
+        }
+        var ma = groupMinTargetY0AndHeight(a.links);
+        var mb = groupMinTargetY0AndHeight(b.links);
+        if (Math.abs(ma.minY0 - mb.minY0) < 1e-6) {
+          if (ma.minHAtMinY0 !== mb.minHAtMinY0) return ma.minHAtMinY0 - mb.minHAtMinY0;
+        }
+      }
+
       // Then bigger groups first (stable packing)
       if (a.links.length !== b.links.length) {
         return b.links.length - a.links.length;

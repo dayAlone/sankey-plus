@@ -970,7 +970,7 @@ function resolveCollisionsAndRelax() {
 
 // Assign the links y0 and y1 based on source/target nodes position,
 // plus the link's relative position to other links to the same node
-function computeLinkBreadths(inputGraph) {
+function computeLinkBreadths(inputGraph, circularPortGap) {
   let graph = inputGraph;
 
   graph.nodes.forEach(function (node) {
@@ -988,7 +988,7 @@ function computeLinkBreadths(inputGraph) {
     node.sourceLinks.forEach(function (link) {
       if (link.circular) {
         link.y0 = y0cycle - link.width / 2;
-        y0cycle = y0cycle - link.width;
+        y0cycle = y0cycle - link.width - (circularPortGap || 0);
       } else {
         link.y0 = y0 + link.width / 2;
         y0 += link.width;
@@ -997,7 +997,7 @@ function computeLinkBreadths(inputGraph) {
     node.targetLinks.forEach(function (link) {
       if (link.circular) {
         link.y1 = y1cycle - link.width / 2;
-        y1cycle = y1cycle - link.width;
+        y1cycle = y1cycle - link.width - (circularPortGap || 0);
       } else {
         link.y1 = y1 + link.width / 2;
         y1 += link.width;
@@ -1403,7 +1403,11 @@ class SankeyChart {
     // Recalculate node positions with updated link types
     this.graph = computeNodeBreadths.call(this);
     this.graph = resolveCollisionsAndRelax.call(this);
-    this.graph = computeLinkBreadths(this.graph);
+    // Add a tiny extra separation between circular links at node ports.
+    // Without this, adjacent circular links can "touch" and visually overlap due to
+    // stroke rendering/anti-aliasing (especially for thin links).
+    var circularPortGap = Math.max(1, Math.round((this.config.links.circularGap || 5) * 0.2));
+    this.graph = computeLinkBreadths(this.graph, circularPortGap);
 
     this.graph = straigtenVirtualNodes(this.graph);
 
@@ -1430,7 +1434,7 @@ class SankeyChart {
     // );
     this.graph = computeNodeBreadths.call(this);
     this.graph = resolveCollisionsAndRelax.call(this);
-    this.graph = computeLinkBreadths(this.graph);
+    this.graph = computeLinkBreadths(this.graph, circularPortGap);
     this.graph = straigtenVirtualNodes(this.graph);
 
     this.graph = addCircularPathData(
@@ -1450,13 +1454,15 @@ class SankeyChart {
         this.graph,
         this.config.id,
         this.config.links.typeOrder,
-        this.config.links.typeAccessor
+        this.config.links.typeAccessor,
+        circularPortGap
       );
       this.graph = sortTargetLinks(
         this.graph,
         this.config.id,
         this.config.links.typeOrder,
-        this.config.links.typeAccessor
+        this.config.links.typeAccessor,
+        circularPortGap
       );
     }
 
@@ -1471,13 +1477,15 @@ class SankeyChart {
         this.graph,
         this.config.id,
         this.config.links.typeOrder,
-        this.config.links.typeAccessor
+        this.config.links.typeAccessor,
+        circularPortGap
       );
       this.graph = sortTargetLinks(
         this.graph,
         this.config.id,
         this.config.links.typeOrder,
-        this.config.links.typeAccessor
+        this.config.links.typeAccessor,
+        circularPortGap
       );
     }
 

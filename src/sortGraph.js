@@ -154,7 +154,7 @@ export function ascendingBreadth(a, b) {
 
 
   // sort and set the links' y0 for each node
-export function sortSourceLinks(inputGraph, id) {
+export function sortSourceLinks(inputGraph, id, typeOrder, typeAccessor, circularPortGap) {
 
   let graph = inputGraph;
 
@@ -320,9 +320,21 @@ export function sortSourceLinks(inputGraph, id) {
     // update y0 for links
     var ySourceOffset = node.y0;
 
-    nodesSourceLinks.forEach(function(link) {
+    nodesSourceLinks.forEach(function(link, idx) {
       link.y0 = ySourceOffset + link.width / 2;
       ySourceOffset = ySourceOffset + link.width;
+      // Add a small separation between adjacent circular links on the same loop side.
+      // (Prevents thin links from "touching" and visually overlapping.)
+      var next = nodesSourceLinks[idx + 1];
+      if (
+        circularPortGap &&
+        link.circular &&
+        next &&
+        next.circular &&
+        link.circularLinkType === next.circularLinkType
+      ) {
+        ySourceOffset = ySourceOffset + circularPortGap;
+      }
     });
 
     // correct any circular bottom links so they are at the bottom of the node
@@ -330,9 +342,16 @@ export function sortSourceLinks(inputGraph, id) {
       if (link.circularLinkType == 'bottom') {
         var j = i + 1;
         var offsetFromBottom = 0;
+        var bottomCountBelow = 0;
         // sum the widths of any links that are below this link
         for (j; j < nodeSourceLinksLength; j++) {
           offsetFromBottom = offsetFromBottom + nodesSourceLinks[j].width;
+          if (nodesSourceLinks[j].circular && nodesSourceLinks[j].circularLinkType == 'bottom') {
+            bottomCountBelow++;
+          }
+        }
+        if (circularPortGap && bottomCountBelow > 0) {
+          offsetFromBottom = offsetFromBottom + bottomCountBelow * circularPortGap;
         }
         link.y0 = node.y1 - offsetFromBottom - link.width / 2;
       }
@@ -344,7 +363,7 @@ export function sortSourceLinks(inputGraph, id) {
 
 
 // sort and set the links' y1 for each node
-export function sortTargetLinks(inputGraph, id) {
+export function sortTargetLinks(inputGraph, id, typeOrder, typeAccessor, circularPortGap) {
   let graph = inputGraph;
 
   graph.nodes.forEach(function(node) {
@@ -482,9 +501,19 @@ export function sortTargetLinks(inputGraph, id) {
     // update y1 for links
     var yTargetOffset = node.y0;
 
-    nodesTargetLinks.forEach(function(link) {
+    nodesTargetLinks.forEach(function(link, idx) {
       link.y1 = yTargetOffset + link.width / 2;
       yTargetOffset = yTargetOffset + link.width;
+      var next = nodesTargetLinks[idx + 1];
+      if (
+        circularPortGap &&
+        link.circular &&
+        next &&
+        next.circular &&
+        link.circularLinkType === next.circularLinkType
+      ) {
+        yTargetOffset = yTargetOffset + circularPortGap;
+      }
     });
 
     // correct any circular bottom links so they are at the bottom of the node
@@ -492,9 +521,16 @@ export function sortTargetLinks(inputGraph, id) {
       if (link.circularLinkType == 'bottom') {
         var j = i + 1;
         var offsetFromBottom = 0;
+        var bottomCountBelow = 0;
         // sum the widths of any links that are below this link
         for (j; j < nodesTargetLinksLength; j++) {
           offsetFromBottom = offsetFromBottom + nodesTargetLinks[j].width;
+          if (nodesTargetLinks[j].circular && nodesTargetLinks[j].circularLinkType == 'bottom') {
+            bottomCountBelow++;
+          }
+        }
+        if (circularPortGap && bottomCountBelow > 0) {
+          offsetFromBottom = offsetFromBottom + bottomCountBelow * circularPortGap;
         }
         link.y1 = node.y1 - offsetFromBottom - link.width / 2;
       }
