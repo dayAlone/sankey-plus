@@ -383,6 +383,39 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
     });
   });
 
+  // Compute per-group target-node metadata used for conservative inter-column ordering.
+  // Motivation: when two target nodes sit on the same row (same target.y0) but in adjacent
+  // columns, we often want backlinks to the SMALLER node (tiny height) to stay closer
+  // to the node (i.e., lower for TOP links) instead of being lifted above bundles for
+  // a taller neighbor node.
+  //
+  // This metadata is only used for TOP-link ordering (see sort below) to avoid changing
+  // bottom-link behavior.
+  var groupMetaByCol = {};
+  Object.keys(groups).forEach(function(col) {
+    var group = groups[col];
+    var minTargetY0 = Infinity;
+    var minTargetHeightAtMinY0 = Infinity;
+    group.forEach(function(l) {
+      var t = l.target;
+      if (!t || typeof t.y0 !== "number" || typeof t.y1 !== "number") return;
+      var y0 = t.y0;
+      var h = t.y1 - t.y0;
+      if (y0 < minTargetY0 - 1e-6) {
+        minTargetY0 = y0;
+        minTargetHeightAtMinY0 = h;
+      } else if (Math.abs(y0 - minTargetY0) < 1e-6) {
+        minTargetHeightAtMinY0 = Math.min(minTargetHeightAtMinY0, h);
+      }
+    });
+    if (minTargetY0 === Infinity) minTargetY0 = 0;
+    if (minTargetHeightAtMinY0 === Infinity) minTargetHeightAtMinY0 = 0;
+    groupMetaByCol[col] = {
+      minTargetY0: minTargetY0,
+      minTargetHAtMinY0: minTargetHeightAtMinY0,
+    };
+  });
+
   // Order groups to minimize crossings:
   // - Prefer groups with smaller MAX span first (inner)
   // - Larger-span groups later (outer)
@@ -404,6 +437,22 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
         if (d > maxDistB) maxDistB = d;
       });
       if (maxDistA !== maxDistB) return maxDistA - maxDistB;
+
+      // Conservative TOP-only tie-breaker for neighboring bundles on the same row:
+      // if two target columns have the same minimum target.y0, prefer the column whose
+      // top-most target node is SMALLER (smaller height) to be processed first.
+      // Earlier processing => smaller verticalBuffer => lower TOP arcs (closer to nodes).
+      if (links.length && links[0].circularLinkType === "top") {
+        var ma = groupMetaByCol[String(a.col)] || groupMetaByCol[a.col] || {};
+        var mb = groupMetaByCol[String(b.col)] || groupMetaByCol[b.col] || {};
+        if (typeof ma.minTargetY0 === "number" && typeof mb.minTargetY0 === "number") {
+          if (Math.abs(ma.minTargetY0 - mb.minTargetY0) < 1e-6) {
+            if (ma.minTargetHAtMinY0 !== mb.minTargetHAtMinY0) {
+              return ma.minTargetHAtMinY0 - mb.minTargetHAtMinY0;
+            }
+          }
+        }
+      }
       // Then bigger groups first (stable packing)
       if (a.links.length !== b.links.length) {
         return b.links.length - a.links.length;
