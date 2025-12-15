@@ -206,18 +206,11 @@ export function addCircularPathData(
         // Modest cap (~15% of diagram height) to avoid huge gaps while still allowing escape.
         var maxAllowedBaseOffset = Math.max(verticalMargin, (graph.y1 - graph.y0) * 0.15);
         var baseOffset = Math.min(desiredBaseOffset, maxAllowedBaseOffset);
-        // If this link is part of a bundle (same target column), align the bundle to a common
-        // ceiling/floor using the group's max verticalBuffer. This prevents one link in the
-        // same bundle from "not reaching" another.
-        var vb = link.circularPathData.verticalBuffer;
-        if (
-          link.circularPathData &&
-          link.circularPathData.groupSize > 1 &&
-          typeof link.circularPathData.groupVerticalBuffer === "number"
-        ) {
-          vb = link.circularPathData.groupVerticalBuffer;
-        }
-        var totalOffset = baseOffset + vb;
+        // IMPORTANT: do NOT force all links in a bundle to share the same verticalBuffer.
+        // That makes them collapse onto one horizontal line (same verticalFullExtent).
+        // Group alignment should be handled via groupMinY/groupMaxY (baseOffset sizing),
+        // while per-link verticalBuffer preserves stacking.
+        var totalOffset = baseOffset + link.circularPathData.verticalBuffer;
 
         // bottom links
         if (link.circularLinkType == "bottom") {
@@ -365,6 +358,7 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
     group.forEach(function(l) {
       l.circularPathData.groupMinY = groupMinY;
       l.circularPathData.groupMaxY = groupMaxY;
+      l.circularPathData.groupSize = group.length;
     });
   });
 
@@ -531,22 +525,6 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
       link.circularPathData.verticalBuffer = buffer + link.width / 2;
       console.log(`  => [${i}] ${srcName}->${tgtName} final vBuf = ${link.circularPathData.verticalBuffer.toFixed(2)}`);
     }
-  });
-
-  // For each target-column group, store the max verticalBuffer so the bundle can be aligned
-  // to a consistent ceiling/floor (prevents one link "not reaching" another in the same bundle).
-  orderedGroups.forEach(function(g) {
-    var maxVB = 0;
-    g.links.forEach(function(l) {
-      var vb = (l.circularPathData && typeof l.circularPathData.verticalBuffer === "number")
-        ? l.circularPathData.verticalBuffer
-        : 0;
-      if (vb > maxVB) maxVB = vb;
-    });
-    g.links.forEach(function(l) {
-      l.circularPathData.groupVerticalBuffer = maxVB;
-      l.circularPathData.groupSize = g.links.length;
-    });
   });
 
   return orderedLinks;
