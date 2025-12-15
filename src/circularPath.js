@@ -99,16 +99,40 @@ export function addCircularPathData(
           );
         });
 
-        // Make arc radii consistent with stacking order:
-        // inner (shorter span) first, outer (longer span) last.
+        // Make arc radii consistent with BOTH:
+        // - target/source node grouping (avoid alternating between different targets/sources),
+        // - and stacking order (inner first, outer last).
+        //
+        // NOTE: horizontal "alternating" is primarily a radii-order problem: if we sort by
+        // span first, we can interleave links to different target nodes with the same span.
+        // So we cluster by node position (y0) first, then apply span/vBuf for nesting.
         sameColumnLinks.sort(function(a, b) {
+          // Cluster by TARGET node (for source-side radii, target.y0 is still the
+          // most stable proxy for where the left leg will land).
+          var aTgtY0 = a.target && typeof a.target.y0 === "number" ? a.target.y0 : 0;
+          var bTgtY0 = b.target && typeof b.target.y0 === "number" ? b.target.y0 : 0;
+          if (Math.abs(aTgtY0 - bTgtY0) >= 1e-6) return aTgtY0 - bTgtY0;
+
+          var aTgtH =
+            a.target && typeof a.target.y1 === "number" && typeof a.target.y0 === "number"
+              ? a.target.y1 - a.target.y0
+              : 0;
+          var bTgtH =
+            b.target && typeof b.target.y1 === "number" && typeof b.target.y0 === "number"
+              ? b.target.y1 - b.target.y0
+              : 0;
+          if (aTgtH !== bTgtH) return aTgtH - bTgtH; // smaller target first
+
+          // Then by span (shorter first = inner)
           var ad = Math.abs((a.source.column || 0) - (a.target.column || 0));
           var bd = Math.abs((b.source.column || 0) - (b.target.column || 0));
           if (ad !== bd) return ad - bd;
-          // tie-breaker: keep stable with current vertical stacking when spans are equal
+
+          // Then by current vertical stacking (inner first)
           var av = a.circularPathData ? a.circularPathData.verticalBuffer : 0;
           var bv = b.circularPathData ? b.circularPathData.verticalBuffer : 0;
           if (av !== bv) return av - bv;
+
           return (a.circularLinkID || 0) - (b.circularLinkID || 0);
         });
 
@@ -132,14 +156,31 @@ export function addCircularPathData(
             l.circularLinkType == thisCircularLinkType
           );
         });
-        // Same for target side radii: keep consistent with verticalBuffer stacking.
+        // Target side radii: cluster by TARGET node first to avoid horizontal alternating,
+        // then use span/vBuf for consistent nesting.
         sameColumnLinks.sort(function(a, b) {
+          var aTgtY0 = a.target && typeof a.target.y0 === "number" ? a.target.y0 : 0;
+          var bTgtY0 = b.target && typeof b.target.y0 === "number" ? b.target.y0 : 0;
+          if (Math.abs(aTgtY0 - bTgtY0) >= 1e-6) return aTgtY0 - bTgtY0;
+
+          var aTgtH =
+            a.target && typeof a.target.y1 === "number" && typeof a.target.y0 === "number"
+              ? a.target.y1 - a.target.y0
+              : 0;
+          var bTgtH =
+            b.target && typeof b.target.y1 === "number" && typeof b.target.y0 === "number"
+              ? b.target.y1 - b.target.y0
+              : 0;
+          if (aTgtH !== bTgtH) return aTgtH - bTgtH;
+
           var ad = Math.abs((a.source.column || 0) - (a.target.column || 0));
           var bd = Math.abs((b.source.column || 0) - (b.target.column || 0));
           if (ad !== bd) return ad - bd;
+
           var av = a.circularPathData ? a.circularPathData.verticalBuffer : 0;
           var bv = b.circularPathData ? b.circularPathData.verticalBuffer : 0;
           if (av !== bv) return av - bv;
+
           return (a.circularLinkID || 0) - (b.circularLinkID || 0);
         });
 
