@@ -156,6 +156,11 @@ function identifyCircles(inputGraph, sortNodes) {
 function selectCircularLinkTypes(inputGraph, id) {
   let graph = inputGraph;
 
+  // Reset any per-run forced routing hints
+  graph.links.forEach(function (l) {
+    if (l && l._forcedCircularLinkType) delete l._forcedCircularLinkType;
+  });
+
   let numberOfTops = 0;
   let numberOfBottoms = 0;
   graph.links.forEach(function (link) {
@@ -297,6 +302,10 @@ function selectCircularLinkTypes(inputGraph, id) {
       // We want Link 25 to be Top.
       
       var badBottomLink = links[lastBottomIndex];
+      // Respect explicit routing decisions (e.g. headroom balancing below)
+      if (badBottomLink && badBottomLink._forcedCircularLinkType) {
+        return;
+      }
       // Only flip if target is actually above source (geometry supports Top)
       var srcY = (badBottomLink.source.y0 + badBottomLink.source.y1) / 2;
       var tgtY = (badBottomLink.target.y0 + badBottomLink.target.y1) / 2;
@@ -306,6 +315,62 @@ function selectCircularLinkTypes(inputGraph, id) {
       }
     }
   });
+
+  // Headroom balancing pass:
+  // If a target node has too many TOP circular links, the outermost links are forced very high.
+  // When we have insufficient headroom above the target, allow moving some of those links to BOTTOM.
+  // This keeps readability high while still respecting "no crossings to the same target".
+  //
+  // Only run when we have geometry (y0/y1) and link widths computed (after adjustSankeySize).
+  var hasLayout =
+    graph.nodes.length &&
+    typeof graph.nodes[0].y0 === "number" &&
+    graph.links.length &&
+    typeof graph.links[0].width === "number";
+  if (hasLayout) {
+    var topLinksByTarget = groups(
+      graph.links.filter((l) => l.circular && !selfLinking(l, id) && l.circularLinkType === "top"),
+      (l) => getNodeID(l.target, id)
+    );
+
+    topLinksByTarget.forEach(([targetId, linksToTarget]) => {
+      if (!linksToTarget || linksToTarget.length < 2) return;
+      var targetNode = linksToTarget[0].target;
+      if (!targetNode || typeof targetNode.y0 !== "number") return;
+
+      // Headroom above the target node (approx) – if stack exceeds this, outer links will escape far upward.
+      var headroom = Math.max(0, targetNode.y0 - graph.y0);
+
+      // Estimate stack height using link widths (dominant term). We don't have circularGap here,
+      // so use a small constant gap estimate (2px) – width dominates anyway for thick links.
+      var estimatedStack = linksToTarget.reduce((s, l) => s + (l.width || 0), 0) + (linksToTarget.length - 1) * 2;
+
+      // If stack is too tall relative to headroom, move some thick outer links to bottom.
+      if (headroom > 0 && estimatedStack > headroom * 0.9) {
+        // Prefer moving thick / long-span links first – they reduce stack height the most.
+        var candidates = linksToTarget
+          .slice()
+          .sort((a, b) => {
+            var bw = b.width || 0;
+            var aw = a.width || 0;
+            if (bw !== aw) return bw - aw;
+            var bs = Math.abs((b.source.column || 0) - (b.target.column || 0));
+            var as = Math.abs((a.source.column || 0) - (a.target.column || 0));
+            return bs - as;
+          });
+
+        var remaining = estimatedStack;
+        for (var k = 0; k < candidates.length; k++) {
+          if (remaining <= headroom * 0.9) break;
+          var lnk = candidates[k];
+          // Move to bottom and mark as forced so later passes won't flip it back.
+          lnk.circularLinkType = "bottom";
+          lnk._forcedCircularLinkType = "bottom";
+          remaining -= (lnk.width || 0) + 2;
+        }
+      }
+    });
+  }
   
   // Second pass: determine types for self-links based on other circular links of the same node
   graph.links.forEach(function (link) {
