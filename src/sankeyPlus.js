@@ -317,10 +317,9 @@ function selectCircularLinkTypes(inputGraph, id) {
   });
 
   // Local relief pass (conservative):
-  // If a target node has a very large TOP bundle, allow moving AT MOST ONE "local" backlink
-  // (short span, ideally adjacent column) to BOTTOM. This matches the desired look:
-  // diagram stays mostly "top", but one problematic close-by backlink can close at the bottom
-  // without introducing many distant backlinks from both sides.
+  // If a target node has a very large TOP bundle, allow moving AT MOST ONE *distant* backlink
+  // (large span) to BOTTOM. This makes the bundle "wrap" (outer/distant goes lower) and
+  // reduces crossings in dense areas, without splitting many links across both sides.
   var nonSelfCircular = graph.links.filter((l) => l.circular && !selfLinking(l, id));
   var linksByTarget = groups(nonSelfCircular, (l) => getNodeID(l.target, id));
 
@@ -335,28 +334,21 @@ function selectCircularLinkTypes(inputGraph, id) {
     // Only if target is really congested on top
     if (topLinks.length < 8) return;
 
-    // Prefer a very local backlink (span 1), fallback to span 2.
+    // Prefer the most distant backlink(s) first. We only move ONE to avoid the
+    // "distant links from both sides" look.
     var candidates = topLinks.filter((l) => {
-      var span = Math.abs((l.source.column || 0) - (l.target.column || 0));
       var isBackward = (l.target.column || 0) <= (l.source.column || 0);
-      return isBackward && span <= 1;
+      return isBackward;
     });
-    if (candidates.length === 0) {
-      candidates = topLinks.filter((l) => {
-        var span = Math.abs((l.source.column || 0) - (l.target.column || 0));
-        var isBackward = (l.target.column || 0) <= (l.source.column || 0);
-        return isBackward && span <= 2;
-      });
-    }
     if (candidates.length === 0) return;
 
     candidates.sort((a, b) => {
       var as = Math.abs((a.source.column || 0) - (a.target.column || 0));
       var bs = Math.abs((b.source.column || 0) - (b.target.column || 0));
-      if (as !== bs) return as - bs; // shortest first
+      if (as !== bs) return bs - as; // longest first
       var aw = a.width || 0;
       var bw = b.width || 0;
-      return aw - bw; // thinner first as tie-break
+      return bw - aw; // thicker first as tie-break
     });
 
     var chosen = candidates[0];
