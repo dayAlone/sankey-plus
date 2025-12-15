@@ -470,12 +470,15 @@ function circularLinksActuallyCross(link1, link2) {
   }
 
   // Horizontal ranges overlap significantly (not just touching at boundary)
-  // If both links have horizontal segments in the same column range, they would overlap
-  var overlapStart = Math.max(link1Min, link2Min);
-  var overlapEnd = Math.min(link1Max, link2Max);
-  if (overlapEnd > overlapStart) {
-    // There's actual horizontal overlap (more than just touching at a point)
-    return true;
+  // Only force stacking if they target the same column (same vertical segments)
+  // For different target columns, allow them to cross without stacking to avoid visual overlap issues
+  if (sameTarget) {
+    var overlapStart = Math.max(link1Min, link2Min);
+    var overlapEnd = Math.min(link1Max, link2Max);
+    if (overlapEnd > overlapStart) {
+      // There's actual horizontal overlap (more than just touching at a point)
+      return true;
+    }
   }
   
   // With proper span-distance sorting, other crossings (vertical inside range) don't occur:
