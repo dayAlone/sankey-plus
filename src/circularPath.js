@@ -593,13 +593,10 @@ function circularLinksActuallyCross(link1, link2) {
   // Same TARGET NODE: stack (they share the same endpoint and can overlap near the node).
   if (sameNode(link1.target, link2.target)) return true;
 
-  // Special: same TARGET COLUMN but DIFFERENT target nodes.
-  // These links are typically separable by radii (different `leftFullExtent`) and do not need
-  // to add verticalBuffer against each other. Treating them as crossing creates the
-  // "backlinks are too spread out" effect for small target nodes.
-  if (link1Target === link2Target && !sameNode(link1.target, link2.target)) {
-    return false;
-  }
+  // NOTE: we intentionally do NOT auto-stack merely because target *column* matches.
+  // However, we also must not early-return false here: links targeting different nodes in
+  // the same column can still geometrically overlap (nested spans, shared leg columns, etc),
+  // and in that case we still need verticalBuffer + circularGap to prevent visual overlap.
 
   // Same SOURCE column = right vertical segments would overlap at source.
   // This is a common cause of "double-crossing" (links swap order near the source,
