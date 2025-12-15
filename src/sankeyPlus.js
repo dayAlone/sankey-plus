@@ -215,7 +215,48 @@ function selectCircularLinkTypes(inputGraph, id) {
     }
   });
   
-  // Second pass: determine types for self-links based on other circular links of the same node
+  // Second pass: synchronize bidirectional circular links (same nodes, opposite directions)
+  // These "counter-flowing" links must use the same circularLinkType to avoid overlap
+  var processedPairs = new Set();
+  
+  graph.links.forEach(function (link) {
+    if (!link.circular || selfLinking(link, id)) return;
+    
+    var linkId = getNodeID(link.source, id) + '-' + getNodeID(link.target, id);
+    var reverseLinkId = getNodeID(link.target, id) + '-' + getNodeID(link.source, id);
+    
+    if (processedPairs.has(linkId) || processedPairs.has(reverseLinkId)) return;
+    
+    // Find reverse link
+    var reverseLink = graph.links.find(function(l) {
+      return l.circular && 
+             !selfLinking(l, id) &&
+             getNodeID(l.source, id) === getNodeID(link.target, id) &&
+             getNodeID(l.target, id) === getNodeID(link.source, id);
+    });
+    
+    if (reverseLink) {
+      // Found a pair - synchronize their types
+      // Use the type of the link with larger value, or "top" if equal
+      var preferredType;
+      if (link.value > reverseLink.value) {
+        preferredType = link.circularLinkType;
+      } else if (reverseLink.value > link.value) {
+        preferredType = reverseLink.circularLinkType;
+      } else {
+        // Equal values - prefer "top"
+        preferredType = link.circularLinkType === "top" || reverseLink.circularLinkType === "top" ? "top" : "bottom";
+      }
+      
+      link.circularLinkType = preferredType;
+      reverseLink.circularLinkType = preferredType;
+      
+      processedPairs.add(linkId);
+      processedPairs.add(reverseLinkId);
+    }
+  });
+  
+  // Third pass: determine types for self-links based on other circular links of the same node
   graph.links.forEach(function (link) {
     if (link.circular && selfLinking(link, id)) {
       // Find the predominant type of other circular links for this node
