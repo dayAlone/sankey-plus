@@ -107,21 +107,23 @@ export function addCircularPathData(
         // span first, we can interleave links to different target nodes with the same span.
         // So we cluster by node position (y0) first, then apply span/vBuf for nesting.
         sameColumnLinks.sort(function(a, b) {
-          // Cluster by TARGET node (for source-side radii, target.y0 is still the
-          // most stable proxy for where the left leg will land).
-          var aTgtY0 = a.target && typeof a.target.y0 === "number" ? a.target.y0 : 0;
-          var bTgtY0 = b.target && typeof b.target.y0 === "number" ? b.target.y0 : 0;
-          if (Math.abs(aTgtY0 - bTgtY0) >= 1e-6) return aTgtY0 - bTgtY0;
+          // SOURCE side radii: cluster by SOURCE node to keep exits from the same node
+          // adjacent (prevents "backlinks moved" / unexpected braiding near the source).
+          // This was previously (incorrectly) clustering by target.y0 which can reshuffle
+          // right-side radii and make bundles drift around unrelated nodes.
+          var aSrcY0 = a.source && typeof a.source.y0 === "number" ? a.source.y0 : 0;
+          var bSrcY0 = b.source && typeof b.source.y0 === "number" ? b.source.y0 : 0;
+          if (Math.abs(aSrcY0 - bSrcY0) >= 1e-6) return aSrcY0 - bSrcY0;
 
-          var aTgtH =
-            a.target && typeof a.target.y1 === "number" && typeof a.target.y0 === "number"
-              ? a.target.y1 - a.target.y0
+          var aSrcH =
+            a.source && typeof a.source.y1 === "number" && typeof a.source.y0 === "number"
+              ? a.source.y1 - a.source.y0
               : 0;
-          var bTgtH =
-            b.target && typeof b.target.y1 === "number" && typeof b.target.y0 === "number"
-              ? b.target.y1 - b.target.y0
+          var bSrcH =
+            b.source && typeof b.source.y1 === "number" && typeof b.source.y0 === "number"
+              ? b.source.y1 - b.source.y0
               : 0;
-          if (aTgtH !== bTgtH) return aTgtH - bTgtH; // smaller target first
+          if (aSrcH !== bSrcH) return aSrcH - bSrcH; // smaller source first
 
           // Then by span (shorter first = inner)
           var ad = Math.abs((a.source.column || 0) - (a.target.column || 0));
