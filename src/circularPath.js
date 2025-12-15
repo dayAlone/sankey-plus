@@ -596,6 +596,20 @@ function circularLinksActuallyCross(link1, link2) {
   // This includes same-source-same-target links
   if (sameTarget) return true;
 
+  // Same SOURCE column = right vertical segments would overlap at source.
+  // This is a common cause of "double-crossing" (links swap order near the source,
+  // then swap back near the target). If both links share the same source column,
+  // they must be stacked unless it's an unrelated self-loop that can be nested locally.
+  var sameSource = (link1Source === link2Source);
+  if (sameSource) {
+    // Allow two unrelated self-loop bubbles to be nested by radii.
+    if ((link1SelfLoop || link2SelfLoop) && !shareNode) {
+      // fall through
+    } else {
+      return true;
+    }
+  }
+
   // Self-link handling:
   // NOTE: self-link means "same node", not merely "same column".
   // Column-equality is common for compact circulars and must NOT be treated as a self-loop.
