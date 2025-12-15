@@ -301,7 +301,13 @@ export function sortSourceLinks(inputGraph, id) {
 
           var w1 = link1.width || 0;
           var w2 = link2.width || 0;
-          if (w1 !== w2) return w1 - w2;
+          if (w1 !== w2) {
+            // Within the same span on the same loop side:
+            // - TOP: thinner first (inner), thicker last (outer)
+            // - BOTTOM: thicker first (keeps thin links from sitting on top and crossing)
+            if (link1.circularLinkType === 'bottom') return w2 - w1;
+            return w1 - w2;
+          }
 
           var t1 = (link1.target.y0 + link1.target.y1) / 2;
           var t2 = (link2.target.y0 + link2.target.y1) / 2;
