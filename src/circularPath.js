@@ -616,6 +616,20 @@ function circularLinksActuallyCross(link1, link2) {
     if (selfCol >= otherMin && selfCol <= otherMax) return true;
   }
 
+  // Boundary-touch overlap:
+  // If the column ranges only TOUCH at a boundary (e.g. [2,5] and [5,7]) and BOTH links
+  // have an endpoint at that boundary column, their vertical legs/arc buffers can overlap
+  // visually. This is a common source of "bundle groups overlapping" and should be stacked,
+  // but only in this narrow boundary-touch case (avoids the old over-aggressive stacking).
+  var overlapStart = Math.max(link1Min, link2Min);
+  var overlapEnd = Math.min(link1Max, link2Max);
+  if (overlapStart === overlapEnd) {
+    var c = overlapStart;
+    var link1HasEndpointAt = (link1Source === c || link1Target === c);
+    var link2HasEndpointAt = (link2Source === c || link2Target === c);
+    if (link1HasEndpointAt && link2HasEndpointAt) return true;
+  }
+
   // For non-self links with overlapping ranges, we only need stacking if a vertical
   // "leg" column of one link lies strictly INSIDE the other link's horizontal span.
   // This is the real condition for a vertical segment intersecting a horizontal segment.
