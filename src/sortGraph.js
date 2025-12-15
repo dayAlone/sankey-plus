@@ -172,6 +172,19 @@ export function sortSourceLinks(inputGraph, id) {
 
     // if more than 1 link then sort
     if (nodeSourceLinksLength > 1) {
+      // Precompute max span among TOP circular links from this node.
+      // We use this to keep the farthest (and near-farthest) TOP loops from exiting first,
+      // which can cause heavy braiding/crossings near the source node.
+      var nodeTopMaxSpan = 0;
+      nodesSourceLinks.forEach(function(l) {
+        if (l && l.circular && l.circularLinkType === 'top') {
+          var s = Math.abs((l.target.column || 0) - (l.source.column || 0));
+          if (s > nodeTopMaxSpan) nodeTopMaxSpan = s;
+        }
+      });
+      // If max span is large, treat the two farthest spans as "far" to keep them lowest.
+      var nodeTopFarCutoff = (nodeTopMaxSpan >= 5) ? (nodeTopMaxSpan - 1) : nodeTopMaxSpan;
+
       nodesSourceLinks.sort(function(link1, link2) {
         // if both are not circular...
         if (!link1.circular && !link2.circular) {
@@ -294,9 +307,31 @@ export function sortSourceLinks(inputGraph, id) {
             // SOURCE-side ordering for circular links:
             // For readability at the source node we want INNER loops to take the upper slots
             // so that far/outer loops don't "sit on top" of everything and braid/cross.
-            // - TOP: shorter span exits higher, farther span exits lower.
+            // - TOP: keep farthest (and near-farthest) exits LOWEST, but allow mid-span
+            //        (3-4) loops to exit above near-span (1-2) loops when it improves
+            //        local ordering without bringing back "farthest exits first".
             // - BOTTOM: farther span occupies higher slots within the bottom section (then later anchored to bottom).
             if (link1.circularLinkType === 'bottom') return d2 - d1;
+            // TOP policy:
+            //   far spans (>= nodeTopFarCutoff) -> lowest
+            //   mid spans (3-4)                -> highest
+            //   near spans (1-2)               -> middle
+            // This is a pragmatic balance: prevents the farthest top loop from being first,
+            // while allowing a span=3 loop to exit above span=2 loops when needed.
+            function topSpanRank(span) {
+              if (nodeTopFarCutoff && span >= nodeTopFarCutoff) return 2; // far -> last
+              if (span >= 3) return 0; // mid -> first
+              return 1; // near -> middle
+            }
+            var r1 = topSpanRank(d1);
+            var r2 = topSpanRank(d2);
+            if (r1 !== r2) return r1 - r2;
+            // Within the same rank:
+            // - mid: longer first (4 above 3)
+            // - near: shorter first (1 above 2)
+            if (r1 === 0) return d2 - d1;
+            if (r1 === 1) return d1 - d2;
+            // far: keep shorter first inside far bucket (so the absolute max stays lowest)
             return d1 - d2;
           }
 
