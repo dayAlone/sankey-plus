@@ -448,7 +448,10 @@ export function sortTargetLinks(inputGraph, id) {
             // to the source node, but for readability at the target node we want the
             // farthest backlinks to enter LOWEST (closest to node bottom) so they don't
             // "sit on top" of all other incoming backlinks.
-            // Therefore: distance ASC for both TOP and BOTTOM.
+            // Therefore:
+            // - TOP: distance ASC (farthest enters lowest)
+            // - BOTTOM: distance DESC (farthest enters highest)
+            if (link1.circularLinkType === 'bottom') return d2 - d1;
             return d1 - d2;
           }
 
