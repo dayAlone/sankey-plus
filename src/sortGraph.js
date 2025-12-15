@@ -139,7 +139,21 @@ export function ascendingBreadth(a, b) {
     if (linkColumnDistance(link1) == linkColumnDistance(link2)) {
       return sortLinkSourceYAscending(link1, link2);
     } else {
-      return linkColumnDistance(link2) - linkColumnDistance(link1);
+      // Longest First (Descending) = Inner (Buffer ~0). Shortest Last = Outer (Buffer > 0).
+      // Link Y = BaseY - Buffer.
+      // Inner (Buf 0) = BaseY.
+      // Outer (Buf > 0) = BaseY - Buffer (Higher).
+      // If we want Long to be OUTER (Higher), we must sort Ascending (Short First).
+      // Short (Index 0) -> Buffer 0 -> BaseY.
+      // Long (Index N) -> Buffer > 0 -> BaseY - Buffer (Higher).
+      
+      // Currently: link2 - link1 (Descending).
+      // We want: link1 - link2 (Ascending).
+      // But my previous commit FAILED to apply this?
+      // Or I reverted it?
+      // I am seeing `linkColumnDistance(link2) - linkColumnDistance(link1)` in the file.
+      // So I will change it to `link1 - link2` NOW.
+      return linkColumnDistance(link1) - linkColumnDistance(link2);
     }
   }
 

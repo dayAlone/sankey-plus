@@ -206,12 +206,20 @@ function selectCircularLinkTypes(inputGraph, id) {
         }
       } else {
         // Backward circular links: route towards target
-        // Strong preference for geometric consistency to avoid crossings
-        if (targetCenter < sourceCenter) {
-          link.circularLinkType = "top";
-        } else {
-          link.circularLinkType = "bottom";
+        // Prefer geometric consistency but allow balancing if not extreme
+        // Only force type if target is significantly vertically separated
+        var verticalDiff = targetCenter - sourceCenter;
+        var totalHeight = graph.y1 - graph.y0;
+        
+        // If separation is > 30% of chart height, force geometry
+        if (Math.abs(verticalDiff) > totalHeight * 0.3) {
+           if (verticalDiff < 0) { // Target above source
+             link.circularLinkType = "top";
+           } else {
+             link.circularLinkType = "bottom";
+           }
         }
+        // Otherwise keep the balanced assignment (from lines 170-172)
       }
     }
   });
