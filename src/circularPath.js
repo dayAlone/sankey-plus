@@ -201,23 +201,10 @@ export function addCircularPathData(
 
         // Base offset controls how far the circular link "escapes" above/below the main diagram.
         // Use an adaptive value, but cap it to a modest fraction of the diagram height.
-        //
-        // NOTE: For very small target nodes with many TOP backlinks (groupSize > 1),
-        // the groupMinY/groupMaxY span can be large and would push the whole bundle too high,
-        // making backlinks look overly "spread out". So we soften the offset for that case.
         var columnHeight = relevantMaxY - relevantMinY;
-        var baseOffsetFactor = 0.25;
-        var maxBaseOffsetFactor = 0.15;
-        if (link.circularLinkType === "top" && link.circularPathData && link.circularPathData.groupSize > 1) {
-          var targetHeight = link.target.y1 - link.target.y0;
-          if (targetHeight < 15) {
-            baseOffsetFactor = 0.15;
-            maxBaseOffsetFactor = 0.10;
-          }
-        }
-        var desiredBaseOffset = Math.max(verticalMargin + link.width + 10, columnHeight * baseOffsetFactor);
-        // Cap to a modest fraction of the diagram height to avoid huge gaps while still allowing escape.
-        var maxAllowedBaseOffset = Math.max(verticalMargin, (graph.y1 - graph.y0) * maxBaseOffsetFactor);
+        var desiredBaseOffset = Math.max(verticalMargin + link.width + 10, columnHeight * 0.25);
+        // Modest cap (~15% of diagram height) to avoid huge gaps while still allowing escape.
+        var maxAllowedBaseOffset = Math.max(verticalMargin, (graph.y1 - graph.y0) * 0.15);
         var baseOffset = Math.min(desiredBaseOffset, maxAllowedBaseOffset);
         // IMPORTANT: do NOT force all links in a bundle to share the same verticalBuffer.
         // That makes them collapse onto one horizontal line (same verticalFullExtent).
@@ -603,11 +590,16 @@ function circularLinksActuallyCross(link1, link2) {
   
   // Ranges overlap - check for specific crossing conditions
   
-  var sameTarget = (link1Target === link2Target);
-  
-  // Same TARGET column = left vertical segments would overlap at target
-  // This includes same-source-same-target links
-  if (sameTarget) return true;
+  // Same TARGET NODE: stack (they share the same endpoint and can overlap near the node).
+  if (sameNode(link1.target, link2.target)) return true;
+
+  // Special: same TARGET COLUMN but DIFFERENT target nodes.
+  // These links are typically separable by radii (different `leftFullExtent`) and do not need
+  // to add verticalBuffer against each other. Treating them as crossing creates the
+  // "backlinks are too spread out" effect for small target nodes.
+  if (link1Target === link2Target && !sameNode(link1.target, link2.target)) {
+    return false;
+  }
 
   // Same SOURCE column = right vertical segments would overlap at source.
   // This is a common cause of "double-crossing" (links swap order near the source,
