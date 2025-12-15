@@ -186,6 +186,19 @@ export function addCircularPathData(
             : Math.max(link.source.y1, link.target.y1);
         }
 
+        // If this link is part of a bundle (multiple links targeting the same column),
+        // always use the group extents for baseOffset sizing. Otherwise short-span links
+        // can compute a smaller columnHeight and fail to reach the bundle's height.
+        if (
+          link.circularPathData &&
+          link.circularPathData.groupSize > 1 &&
+          typeof link.circularPathData.groupMinY === "number" &&
+          typeof link.circularPathData.groupMaxY === "number"
+        ) {
+          relevantMinY = link.circularPathData.groupMinY;
+          relevantMaxY = link.circularPathData.groupMaxY;
+        }
+
         // Base offset controls how far the circular link "escapes" above/below the main diagram.
         // Use an adaptive value, but cap it to a modest fraction of the diagram height.
         var columnHeight = relevantMaxY - relevantMinY;
@@ -193,7 +206,18 @@ export function addCircularPathData(
         // Modest cap (~15% of diagram height) to avoid huge gaps while still allowing escape.
         var maxAllowedBaseOffset = Math.max(verticalMargin, (graph.y1 - graph.y0) * 0.15);
         var baseOffset = Math.min(desiredBaseOffset, maxAllowedBaseOffset);
-        var totalOffset = baseOffset + link.circularPathData.verticalBuffer;
+        // If this link is part of a bundle (same target column), align the bundle to a common
+        // ceiling/floor using the group's max verticalBuffer. This prevents one link in the
+        // same bundle from "not reaching" another.
+        var vb = link.circularPathData.verticalBuffer;
+        if (
+          link.circularPathData &&
+          link.circularPathData.groupSize > 1 &&
+          typeof link.circularPathData.groupVerticalBuffer === "number"
+        ) {
+          vb = link.circularPathData.groupVerticalBuffer;
+        }
+        var totalOffset = baseOffset + vb;
 
         // bottom links
         if (link.circularLinkType == "bottom") {
@@ -345,23 +369,26 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
   });
 
   // Order groups to minimize crossings:
-  // - Prefer groups with smaller average span first (inner)
+  // - Prefer groups with smaller MAX span first (inner)
   // - Larger-span groups later (outer)
-  // This avoids the case where a long-span link is processed too early and ends up "inner",
-  // causing it to cross the vertical legs of shorter links from the same source.
+  // Using MAX span (rather than average) ensures that a group containing any long backlink
+  // is treated as "outer" overall, preventing that long backlink from being forced inner
+  // relative to shorter-span links from other groups.
   var orderedGroups = Object.keys(groups)
     .map(function(col) { return { col: +col, links: groups[col] }; })
     .sort(function(a, b) {
-      // Average span ascending
-      var avgDistA = a.links.reduce(function(sum, l) {
-        return sum + Math.abs(l.source.column - l.target.column);
-      }, 0) / a.links.length;
-      var avgDistB = b.links.reduce(function(sum, l) {
-        return sum + Math.abs(l.source.column - l.target.column);
-      }, 0) / b.links.length;
-      if (avgDistA !== avgDistB) {
-        return avgDistA - avgDistB;
-      }
+      // Max span ascending
+      var maxDistA = 0;
+      a.links.forEach(function(l) {
+        var d = Math.abs(l.source.column - l.target.column);
+        if (d > maxDistA) maxDistA = d;
+      });
+      var maxDistB = 0;
+      b.links.forEach(function(l) {
+        var d = Math.abs(l.source.column - l.target.column);
+        if (d > maxDistB) maxDistB = d;
+      });
+      if (maxDistA !== maxDistB) return maxDistA - maxDistB;
       // Then bigger groups first (stable packing)
       if (a.links.length !== b.links.length) {
         return b.links.length - a.links.length;
@@ -506,6 +533,22 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
     }
   });
 
+  // For each target-column group, store the max verticalBuffer so the bundle can be aligned
+  // to a consistent ceiling/floor (prevents one link "not reaching" another in the same bundle).
+  orderedGroups.forEach(function(g) {
+    var maxVB = 0;
+    g.links.forEach(function(l) {
+      var vb = (l.circularPathData && typeof l.circularPathData.verticalBuffer === "number")
+        ? l.circularPathData.verticalBuffer
+        : 0;
+      if (vb > maxVB) maxVB = vb;
+    });
+    g.links.forEach(function(l) {
+      l.circularPathData.groupVerticalBuffer = maxVB;
+      l.circularPathData.groupSize = g.links.length;
+    });
+  });
+
   return orderedLinks;
 }
 
@@ -515,6 +558,24 @@ function circularLinksActuallyCross(link1, link2) {
   var link1Target = link1.target.column;
   var link2Source = link2.source.column;
   var link2Target = link2.target.column;
+
+  // Helper: true self-loop means same node (not just same column)
+  var link1SelfLoop = (link1.source === link1.target) ||
+                      (link1.source && link1.target && link1.source.name === link1.target.name);
+  var link2SelfLoop = (link2.source === link2.target) ||
+                      (link2.source && link2.target && link2.source.name === link2.target.name);
+
+  // Helper: do links share at least one node (object identity preferred; fallback to name)
+  function sameNode(a, b) {
+    if (a === b) return true;
+    if (a && b && a.name !== undefined && b.name !== undefined) return a.name === b.name;
+    return false;
+  }
+  var shareNode =
+    sameNode(link1.source, link2.source) ||
+    sameNode(link1.source, link2.target) ||
+    sameNode(link1.target, link2.source) ||
+    sameNode(link1.target, link2.target);
   
   // Special case: "zero-span" (source.column === target.column) but NOT self-link
   // (source node !== target node). These are very compact local loops and should
@@ -551,28 +612,22 @@ function circularLinksActuallyCross(link1, link2) {
   
   // Ranges overlap - check for specific crossing conditions
   
-  var sameSource = (link1Source === link2Source);
   var sameTarget = (link1Target === link2Target);
   
   // Same TARGET column = left vertical segments would overlap at target
   // This includes same-source-same-target links
   if (sameTarget) return true;
 
-  // Same SOURCE column = right vertical segments overlap at source.
-  // If we don't stack these, the "legs" of a shorter link can intersect the horizontal
-  // segment of a longer link when their spans overlap. Force stacking.
-  if (sameSource) return true;
-  
-  // Boundary touching: one link's target = other link's source (verticals at same column)
-  if (link1Target === link2Source || link1Source === link2Target) return true;
-  
   // Self-link handling:
-  // If one is a self-link, it spans only one column (source=target).
-  // Overlap occurs if the other link spans this column.
-  var link1Self = (link1Source === link1Target);
-  var link2Self = (link2Source === link2Target);
+  // NOTE: self-link means "same node", not merely "same column".
+  // Column-equality is common for compact circulars and must NOT be treated as a self-loop.
+  var link1Self = link1SelfLoop;
+  var link2Self = link2SelfLoop;
   
   if (link1Self || link2Self) {
+    // Only force stacking with self-loops when the links share a node.
+    // Otherwise, the self-loop bubble is local to its node and can be nested by radii.
+    if (!shareNode) return false;
     var selfCol = link1Self ? link1Source : link2Source;
     var otherMin = link1Self ? link2Min : link1Min;
     var otherMax = link1Self ? link2Max : link1Max;
@@ -583,13 +638,20 @@ function circularLinksActuallyCross(link1, link2) {
     if (selfCol >= otherMin && selfCol <= otherMax) return true;
   }
 
-  // Horizontal ranges overlap significantly (not just touching at boundary)
-  // This means their horizontal segments share columns and can visually intersect
-  // with each other's vertical legs unless we stack them. Force stacking.
-  var overlapStart = Math.max(link1Min, link2Min);
-  var overlapEnd = Math.min(link1Max, link2Max);
-  if (overlapEnd > overlapStart) {
-    // There's actual horizontal overlap (more than just touching at a point)
+  // For non-self links with overlapping ranges, we only need stacking if a vertical
+  // "leg" column of one link lies strictly INSIDE the other link's horizontal span.
+  // This is the real condition for a vertical segment intersecting a horizontal segment.
+  // (If they only overlap by range but all endpoints are outside, they can be nested
+  // by radii without needing extra vertical separation.)
+  function inside(col, min, max) {
+    return col > min && col < max;
+  }
+  if (
+    inside(link1Source, link2Min, link2Max) ||
+    inside(link1Target, link2Min, link2Max) ||
+    inside(link2Source, link1Min, link1Max) ||
+    inside(link2Target, link1Min, link1Max)
+  ) {
     return true;
   }
   
