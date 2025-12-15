@@ -215,48 +215,7 @@ function selectCircularLinkTypes(inputGraph, id) {
     }
   });
   
-  // Second pass: synchronize bidirectional circular links (same nodes, opposite directions)
-  // These "counter-flowing" links must use the same circularLinkType to avoid overlap
-  var processedPairs = new Set();
-  
-  graph.links.forEach(function (link) {
-    if (!link.circular || selfLinking(link, id)) return;
-    
-    var linkId = getNodeID(link.source, id) + '-' + getNodeID(link.target, id);
-    var reverseLinkId = getNodeID(link.target, id) + '-' + getNodeID(link.source, id);
-    
-    if (processedPairs.has(linkId) || processedPairs.has(reverseLinkId)) return;
-    
-    // Find reverse link
-    var reverseLink = graph.links.find(function(l) {
-      return l.circular && 
-             !selfLinking(l, id) &&
-             getNodeID(l.source, id) === getNodeID(link.target, id) &&
-             getNodeID(l.target, id) === getNodeID(link.source, id);
-    });
-    
-    if (reverseLink) {
-      // Found a pair - synchronize their types
-      // Use the type of the link with larger value, or "top" if equal
-      var preferredType;
-      if (link.value > reverseLink.value) {
-        preferredType = link.circularLinkType;
-      } else if (reverseLink.value > link.value) {
-        preferredType = reverseLink.circularLinkType;
-      } else {
-        // Equal values - prefer "top"
-        preferredType = link.circularLinkType === "top" || reverseLink.circularLinkType === "top" ? "top" : "bottom";
-      }
-      
-      link.circularLinkType = preferredType;
-      reverseLink.circularLinkType = preferredType;
-      
-      processedPairs.add(linkId);
-      processedPairs.add(reverseLinkId);
-    }
-  });
-  
-  // Third pass: determine types for self-links based on other circular links of the same node
+  // Second pass: determine types for self-links based on other circular links of the same node
   graph.links.forEach(function (link) {
     if (link.circular && selfLinking(link, id)) {
       // Find the predominant type of other circular links for this node
@@ -285,6 +244,61 @@ function selectCircularLinkTypes(inputGraph, id) {
     }
   });
 
+  return graph;
+}
+
+// Synchronize bidirectional circular links to prevent overlap
+// Must be called AFTER selectCircularLinkTypes
+function synchronizeBidirectionalLinks(inputGraph, id) {
+  let graph = inputGraph;
+  
+  var processedPairs = new Set();
+  
+  console.log("=== Synchronizing bidirectional circular links ===");
+  
+  graph.links.forEach(function (link) {
+    if (!link.circular || selfLinking(link, id)) return;
+    
+    var linkId = getNodeID(link.source, id) + '-' + getNodeID(link.target, id);
+    var reverseLinkId = getNodeID(link.target, id) + '-' + getNodeID(link.source, id);
+    
+    if (processedPairs.has(linkId) || processedPairs.has(reverseLinkId)) return;
+    
+    // Find reverse link
+    var reverseLink = graph.links.find(function(l) {
+      return l.circular && 
+             !selfLinking(l, id) &&
+             getNodeID(l.source, id) === getNodeID(link.target, id) &&
+             getNodeID(l.target, id) === getNodeID(link.source, id);
+    });
+    
+    if (reverseLink) {
+      // Found a pair - synchronize their types
+      console.log(`  Found bidirectional pair: ${getNodeID(link.source, id)} <-> ${getNodeID(link.target, id)}`);
+      console.log(`    Link 1: value=${link.value}, type=${link.circularLinkType}`);
+      console.log(`    Link 2: value=${reverseLink.value}, type=${reverseLink.circularLinkType}`);
+      
+      // Use the type of the link with larger value, or "top" if equal
+      var preferredType;
+      if (link.value > reverseLink.value) {
+        preferredType = link.circularLinkType;
+      } else if (reverseLink.value > link.value) {
+        preferredType = reverseLink.circularLinkType;
+      } else {
+        // Equal values - prefer "top"
+        preferredType = link.circularLinkType === "top" || reverseLink.circularLinkType === "top" ? "top" : "bottom";
+      }
+      
+      console.log(`    Synchronized to: ${preferredType}`);
+      
+      link.circularLinkType = preferredType;
+      reverseLink.circularLinkType = preferredType;
+      
+      processedPairs.add(linkId);
+      processedPairs.add(reverseLinkId);
+    }
+  });
+  
   return graph;
 }
 
@@ -1211,6 +1225,7 @@ class SankeyChart {
 
     this.graph = identifyCircles(this.graph, sortNodes);
     this.graph = selectCircularLinkTypes(this.graph, this.config.id);
+    this.graph = synchronizeBidirectionalLinks(this.graph, this.config.id);
 
     this.graph = computeNodeValues(this.graph);
     this.graph = computeNodeDepths(this.graph, sortNodes, align);
@@ -1241,6 +1256,8 @@ class SankeyChart {
     
     // Recalculate circular link types based on final node positions
     this.graph = selectCircularLinkTypes(this.graph, this.config.id);
+    // Synchronize bidirectional circular links to prevent overlap
+    this.graph = synchronizeBidirectionalLinks(this.graph, this.config.id);
     // Update node circularLinkType based on predominant link types
     this.graph = computeNodeValues(this.graph);
     

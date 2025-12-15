@@ -248,7 +248,7 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
   links.forEach(function(l, idx) {
     var srcName = l.source.name || l.source.index;
     var tgtName = l.target.name || l.target.index;
-    console.log(`  [${idx}] ${srcName} -> ${tgtName}, col ${l.source.column}->${l.target.column}, w=${l.width.toFixed(2)}`);
+    console.log(`  [${idx}] ${srcName} -> ${tgtName}, col ${l.source.column}->${l.target.column}, type=${l.circularLinkType}, w=${l.width.toFixed(2)}`);
   });
   
   links.forEach(function (link, i) {
