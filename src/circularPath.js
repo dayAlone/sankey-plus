@@ -244,13 +244,6 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
   
   links.sort(sortLinkColumnAscending);
   
-  console.log("=== calcVerticalBuffer ===");
-  links.forEach(function(l, idx) {
-    var srcName = l.source.name || l.source.index;
-    var tgtName = l.target.name || l.target.index;
-    console.log(`  [${idx}] ${srcName} -> ${tgtName}, col ${l.source.column}->${l.target.column}, type=${l.circularLinkType}, w=${l.width.toFixed(2)}`);
-  });
-  
   links.forEach(function (link, i) {
     var buffer = 0;
     var srcName = link.source.name || link.source.index;
@@ -267,7 +260,14 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
       // Check for collisions with other links processed so far
       for (var j = 0; j < i; j++) {
         if (circularLinksActuallyCross(links[i], links[j])) {
-          var gap = circularLinkGap;
+          // Check if both links share at least one node (for tighter spacing)
+          var sameNode = (link.source.name === links[j].source.name || 
+                         link.source.name === links[j].target.name ||
+                         link.target.name === links[j].source.name ||
+                         link.target.name === links[j].target.name);
+          // Use no gap for links at the same node, full gap otherwise
+          var gap = sameNode ? 0 : circularLinkGap;
+          
           var bufferOverThisLink =
             links[j].circularPathData.verticalBuffer +
             links[j].width / 2 +
@@ -292,13 +292,16 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
       link.circularPathData.verticalBuffer = buffer + link.width / 2;
     } else {
       for (var j = 0; j < i; j++) {
-        if (!selfLinking(links[j], id) && circularLinksActuallyCross(links[i], links[j])) {
+        if (circularLinksActuallyCross(links[i], links[j])) {
           var prevSrcName = links[j].source.name || links[j].source.index;
           var prevTgtName = links[j].target.name || links[j].target.index;
-          // Smaller gap for links to same target
-          var sameTarget = (links[i].target.name || links[i].target.index) === 
-                           (links[j].target.name || links[j].target.index);
-          var gap = sameTarget ? Math.max(1, circularLinkGap / 2) : circularLinkGap;
+          // Check if both links share at least one node
+          var sameNode = (link.source.name === links[j].source.name || 
+                         link.source.name === links[j].target.name ||
+                         link.target.name === links[j].source.name ||
+                         link.target.name === links[j].target.name);
+          // Use no gap for links at the same node, full gap otherwise
+          var gap = sameNode ? 0 : circularLinkGap;
           
           var bufferOverThisLink =
             links[j].circularPathData.verticalBuffer +

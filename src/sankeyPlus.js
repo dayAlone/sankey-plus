@@ -254,8 +254,6 @@ function synchronizeBidirectionalLinks(inputGraph, id) {
   
   var processedPairs = new Set();
   
-  console.log("=== Synchronizing bidirectional circular links ===");
-  
   graph.links.forEach(function (link) {
     if (!link.circular || selfLinking(link, id)) return;
     
@@ -274,10 +272,6 @@ function synchronizeBidirectionalLinks(inputGraph, id) {
     
     if (reverseLink) {
       // Found a pair - synchronize their types
-      console.log(`  Found bidirectional pair: ${getNodeID(link.source, id)} <-> ${getNodeID(link.target, id)}`);
-      console.log(`    Link 1: value=${link.value}, type=${link.circularLinkType}`);
-      console.log(`    Link 2: value=${reverseLink.value}, type=${reverseLink.circularLinkType}`);
-      
       // Use the type of the link with larger value, or "top" if equal
       var preferredType;
       if (link.value > reverseLink.value) {
@@ -288,8 +282,6 @@ function synchronizeBidirectionalLinks(inputGraph, id) {
         // Equal values - prefer "top"
         preferredType = link.circularLinkType === "top" || reverseLink.circularLinkType === "top" ? "top" : "bottom";
       }
-      
-      console.log(`    Synchronized to: ${preferredType}`);
       
       link.circularLinkType = preferredType;
       reverseLink.circularLinkType = preferredType;
