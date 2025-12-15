@@ -206,11 +206,95 @@ function selectCircularLinkTypes(inputGraph, id) {
         }
       } else {
         // Backward circular links: route towards target
+        // Strong preference for geometric consistency to avoid crossings
         if (targetCenter < sourceCenter) {
           link.circularLinkType = "top";
-        } else if (targetCenter > sourceCenter) {
+        } else {
           link.circularLinkType = "bottom";
         }
+      }
+    }
+  });
+
+  // Consistency pass: prevent X-crossings for links leaving the same column
+  // If a link from a lower node goes Top, and a link from an upper node goes Bottom, they cross.
+  // We should swap them or force them to be consistent.
+  var linksByColumn = groups(graph.links.filter(l => l.circular && !selfLinking(l, id)), l => l.source.column);
+  
+  linksByColumn.forEach(([col, links]) => {
+    // Sort links by source Y (top to bottom)
+    links.sort((a, b) => ((a.source.y0 + a.source.y1)/2) - ((b.source.y0 + b.source.y1)/2));
+    
+    // We want to avoid the pattern: [Bottom, ..., Top]
+    // Because Bottom means "goes down" (from upper node), Top means "goes up" (from lower node).
+    // Actually, Bottom means "route below", Top means "route above".
+    // Upper node (small Y) -> Bottom (goes down).
+    // Lower node (large Y) -> Top (goes up).
+    // This is the X-crossing.
+    
+    // So if we see a Bottom link followed by a Top link, we have a problem.
+    // We should enforce a transition point: Top links then Bottom links (or all Top, or all Bottom).
+    // Wait. Top links go UP. Bottom links go DOWN.
+    // Upper nodes should go Top (up). Lower nodes should go Bottom (down).
+    // This maximizes separation.
+    
+    // Current heuristic: Target < Source => Top.
+    // If Target is above, go Top.
+    
+    // Let's just fix the specific conflict if found.
+    // Find last Bottom link index and first Top link index.
+    // If first Top > last Bottom (indices in sorted array), we are fine (Top ... Bottom).
+    // No, wait.
+    // Top links (go up) should be from UPPER nodes?
+    // If Upper node goes Top (up), it clears the space.
+    // If Lower node goes Bottom (down), it clears the space.
+    // So we want [Top, Top, ..., Bottom, Bottom].
+    
+    // If we have [Bottom, Top], then Upper node goes Bottom (down), Lower node goes Top (up). CROSSING!
+    
+    // So we iterate and check for Bottom followed by Top.
+    var lastBottomIndex = -1;
+    links.forEach((l, i) => {
+      if (l.circularLinkType === "bottom") lastBottomIndex = i;
+    });
+    
+    var firstTopAfterBottom = -1;
+    if (lastBottomIndex !== -1) {
+      for (var i = lastBottomIndex + 1; i < links.length; i++) {
+        if (links[i].circularLinkType === "top") {
+          firstTopAfterBottom = i;
+          break;
+        }
+      }
+    }
+    
+    if (firstTopAfterBottom !== -1) {
+      // We found a Bottom link (from upper node) followed by a Top link (from lower node).
+      // This causes a crossing.
+      // We need to resolve this.
+      // Strategy: Force the "Bottom" link to be "Top" (if target is high) or "Top" link to be "Bottom" (if target is low).
+      // Or just flip one of them to match the other?
+      
+      // Let's force all links in the "crossing zone" to be the same type?
+      // Or simply: If we have this pattern, flip the Bottom one to Top?
+      // Upper node going Bottom is usually worse than Upper node going Top (unless target is REALLY low).
+      
+      // Let's try to flip the Bottom link to Top.
+      // Link at lastBottomIndex is "bottom". Flip to "top".
+      // But verify if that makes sense.
+      // If we flip it, we might create other issues?
+      // Assuming "Top" is generally safe for links going to higher targets.
+      
+      // In our specific case: Link 25 (Upper) is Bottom. Link 2 (Lower) is Top.
+      // We want Link 25 to be Top.
+      
+      var badBottomLink = links[lastBottomIndex];
+      // Only flip if target is actually above source (geometry supports Top)
+      var srcY = (badBottomLink.source.y0 + badBottomLink.source.y1) / 2;
+      var tgtY = (badBottomLink.target.y0 + badBottomLink.target.y1) / 2;
+      
+      if (tgtY < srcY) {
+         badBottomLink.circularLinkType = "top";
       }
     }
   });
