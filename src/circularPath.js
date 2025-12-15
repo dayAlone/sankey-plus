@@ -242,12 +242,69 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
     link._targetGroupMaxSpan = maxSpanByTarget[link.target.column];
   });
   
-  links.sort(sortLinkColumnAscending);
-  
-  links.forEach(function (link, i) {
+  // New grouping algorithm:
+  // 1. Group links by target column to ensure links to same node are together
+  // 2. Within each group, sort by ascending distance (shortest first)
+  // 3. Order groups to minimize horizontal crossings between groups
+  // 4. Apply vertical buffering within this grouped order
+
+  var groups = {};
+  links.forEach(function(link) {
+    var targetCol = link.target.column;
+    if (!groups[targetCol]) groups[targetCol] = [];
+    groups[targetCol].push(link);
+  });
+
+  // Sort within each group by ascending distance (shortest spans first)
+  Object.values(groups).forEach(function(group) {
+    group.sort(function(a, b) {
+      var distA = Math.abs(a.source.column - a.target.column);
+      var distB = Math.abs(b.source.column - b.target.column);
+      return distA - distB;
+    });
+  });
+
+  // Order groups to minimize crossings: groups with more links first,
+  // then by average distance, then by column index
+  var orderedGroups = Object.keys(groups)
+    .map(function(col) { return { col: +col, links: groups[col] }; })
+    .sort(function(a, b) {
+      // More links first (bigger groups get priority)
+      if (a.links.length !== b.links.length) {
+        return b.links.length - a.links.length;
+      }
+      // Then by average distance ascending
+      var avgDistA = a.links.reduce(function(sum, l) {
+        return sum + Math.abs(l.source.column - l.target.column);
+      }, 0) / a.links.length;
+      var avgDistB = b.links.reduce(function(sum, l) {
+        return sum + Math.abs(l.source.column - l.target.column);
+      }, 0) / b.links.length;
+      if (avgDistA !== avgDistB) {
+        return avgDistA - avgDistB;
+      }
+      // Finally by column index
+      return a.col - b.col;
+    });
+
+  // Flatten back to ordered links array
+  var orderedLinks = [];
+  orderedGroups.forEach(function(group) {
+    orderedLinks = orderedLinks.concat(group.links);
+  });
+
+  // Process links in grouped order
+  orderedLinks.forEach(function (link, i) {
     var buffer = 0;
     var srcName = link.source.name || link.source.index;
     var tgtName = link.target.name || link.target.index;
+
+    // Find current group
+    var currentGroupIndex = orderedGroups.findIndex(function(g) {
+      return g.col === link.target.column;
+    });
+    var currentGroup = orderedGroups[currentGroupIndex];
+    var linkIndexInGroup = currentGroup.links.indexOf(link);
 
     if (selfLinking(link, id)) {
       // For self-links, calculate buffer based on overlaps with other links
@@ -258,8 +315,9 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
       link.circularPathData.verticalBuffer = buffer + link.width / 2;
       
       // Check for collisions with other links processed so far
+      // For self-links, check all previous (cross-group and same-group)
       for (var j = 0; j < i; j++) {
-        if (circularLinksActuallyCross(links[i], links[j])) {
+        if (circularLinksActuallyCross(link, orderedLinks[j])) {
           // Check if both links share at least one node (for tighter spacing)
           var sameNode = (link.source.name === links[j].source.name || 
                          link.source.name === links[j].target.name ||
@@ -294,10 +352,26 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
       
       link.circularPathData.verticalBuffer = buffer + link.width / 2;
     } else {
+      // Check collisions based on grouping:
+      // - Within same group: only check previous links in same group (guarantees no crossings within group)
+      // - Across groups: check all previous links (allows stacking between groups)
       for (var j = 0; j < i; j++) {
-        if (circularLinksActuallyCross(links[i], links[j])) {
-          var prevSrcName = links[j].source.name || links[j].source.index;
-          var prevTgtName = links[j].target.name || links[j].target.index;
+        var prevLink = orderedLinks[j];
+        var prevGroupIndex = orderedGroups.findIndex(function(g) {
+          return g.col === prevLink.target.column;
+        });
+
+        // If same group, only check if previous in group
+        if (prevGroupIndex === currentGroupIndex) {
+          if (currentGroup.links.indexOf(prevLink) >= linkIndexInGroup) {
+            continue; // Skip if not previous in group
+          }
+        }
+        // Different groups or valid same-group previous - check crossing
+
+        if (circularLinksActuallyCross(link, prevLink)) {
+          var prevSrcName = prevLink.source.name || prevLink.source.index;
+          var prevTgtName = prevLink.target.name || prevLink.target.index;
           // Check if both links share at least one node
           var sameNode = (link.source.name === links[j].source.name || 
                          link.source.name === links[j].target.name ||
@@ -332,7 +406,7 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
           bufferOverThisLink += offsetCorrection;
 
           console.log(`  [${i}] ${srcName}->${tgtName} CROSSES [${j}] ${prevSrcName}->${prevTgtName}, gap=${gap}, buf=${bufferOverThisLink.toFixed(2)}`);
-          
+
           buffer = bufferOverThisLink > buffer ? bufferOverThisLink : buffer;
         }
       }
@@ -342,7 +416,7 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
     }
   });
 
-  return links;
+  return orderedLinks;
 }
 
 // Links cross only if their horizontal ranges overlap AND they share a column
