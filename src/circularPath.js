@@ -317,26 +317,27 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
       // Check for collisions with other links processed so far
       // For self-links, check all previous (cross-group and same-group)
       for (var j = 0; j < i; j++) {
-        if (circularLinksActuallyCross(link, orderedLinks[j])) {
+        var prevLink = orderedLinks[j];
+        if (circularLinksActuallyCross(link, prevLink)) {
           // Check if both links share at least one node (for tighter spacing)
-          var sameNode = (link.source.name === links[j].source.name || 
-                         link.source.name === links[j].target.name ||
-                         link.target.name === links[j].source.name ||
-                         link.target.name === links[j].target.name);
+          var sameNode = (link.source.name === prevLink.source.name || 
+                         link.source.name === prevLink.target.name ||
+                         link.target.name === prevLink.source.name ||
+                         link.target.name === prevLink.target.name);
           // Use no gap ONLY if both are self-links AND they share a node
           var gap = circularLinkGap;
-          if (selfLinking(link, id) && selfLinking(links[j], id) && sameNode) {
+          if (selfLinking(link, id) && selfLinking(prevLink, id) && sameNode) {
             gap = 0;
           }
           
           var bufferOverThisLink =
-            links[j].circularPathData.verticalBuffer +
-            links[j].width / 2 +
+            prevLink.circularPathData.verticalBuffer +
+            prevLink.width / 2 +
             gap;
             
           // Use same offset correction logic as for regular links
           var thisBaseY = link.circularPathData.baseY;
-          var prevBaseY = links[j].circularPathData.baseY;
+          var prevBaseY = prevLink.circularPathData.baseY;
           var offsetCorrection = 0;
           
           if (link.circularLinkType === "bottom") {
@@ -373,24 +374,24 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
           var prevSrcName = prevLink.source.name || prevLink.source.index;
           var prevTgtName = prevLink.target.name || prevLink.target.index;
           // Check if both links share at least one node
-          var sameNode = (link.source.name === links[j].source.name || 
-                         link.source.name === links[j].target.name ||
-                         link.target.name === links[j].source.name ||
-                         link.target.name === links[j].target.name);
+          var sameNode = (link.source.name === prevLink.source.name || 
+                         link.source.name === prevLink.target.name ||
+                         link.target.name === prevLink.source.name ||
+                         link.target.name === prevLink.target.name);
           // Use no gap ONLY if both are self-links AND they share a node
           var gap = circularLinkGap;
-          if (selfLinking(link, id) && selfLinking(links[j], id) && sameNode) {
+          if (selfLinking(link, id) && selfLinking(prevLink, id) && sameNode) {
             gap = 0;
           }
           
           var bufferOverThisLink =
-            links[j].circularPathData.verticalBuffer +
-            links[j].width / 2 +
+            prevLink.circularPathData.verticalBuffer +
+            prevLink.width / 2 +
             gap;
           
           // Fix for visual hole: adjust buffer requirement based on vertical separation of base positions
           var thisBaseY = link.circularPathData.baseY;
-          var prevBaseY = links[j].circularPathData.baseY;
+          var prevBaseY = prevLink.circularPathData.baseY;
           var offsetCorrection = 0;
           
           if (link.circularLinkType === "bottom") {
