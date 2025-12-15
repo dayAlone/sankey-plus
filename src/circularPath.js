@@ -259,12 +259,32 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
     groups[targetCol].push(link);
   });
 
-  // Sort within each group by ascending distance (shortest spans first)
+  // Sort within each group (same target column) so that:
+  // - self-links (distance 0) come LAST (outer) relative to other links,
+  // - for equal span, thinner links come first (inner) and thicker links come last (outer).
+  // This helps avoid:
+  // - non-self backlinks being pushed below self-loops,
+  // - crossings between same-span links,
+  // - thin links becoming outermost and entering a node from above.
   Object.values(groups).forEach(function(group) {
     group.sort(function(a, b) {
+      var aSelf = selfLinking(a, id);
+      var bSelf = selfLinking(b, id);
+      if (aSelf !== bSelf) return aSelf ? 1 : -1;
+
       var distA = Math.abs(a.source.column - a.target.column);
       var distB = Math.abs(b.source.column - b.target.column);
-      return distA - distB;
+      if (distA !== distB) return distA - distB;
+
+      var aw = a.width || 0;
+      var bw = b.width || 0;
+      if (aw !== bw) return aw - bw; // thinner first (inner), thicker last (outer)
+
+      // Stable-ish tie-breakers to reduce jitter between reruns
+      var aSrcY = (a.source.y0 + a.source.y1) / 2;
+      var bSrcY = (b.source.y0 + b.source.y1) / 2;
+      if (aSrcY !== bSrcY) return aSrcY - bSrcY;
+      return (a.circularLinkID || 0) - (b.circularLinkID || 0) || a.index - b.index;
     });
   });
 
