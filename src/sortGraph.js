@@ -139,21 +139,59 @@ export function ascendingBreadth(a, b) {
     if (linkColumnDistance(link1) == linkColumnDistance(link2)) {
       return sortLinkSourceYAscending(link1, link2);
     } else {
-      // Longest First (Descending) = Inner (Buffer ~0). Shortest Last = Outer (Buffer > 0).
-      // Link Y = BaseY - Buffer.
-      // Inner (Buf 0) = BaseY.
-      // Outer (Buf > 0) = BaseY - Buffer (Higher).
-      // If we want Long to be OUTER (Higher), we must sort Ascending (Short First).
-      // Short (Index 0) -> Buffer 0 -> BaseY.
-      // Long (Index N) -> Buffer > 0 -> BaseY - Buffer (Higher).
+      // Sort Descending by signed distance (e.g. -4 > -6).
+      // -4 (Short) - (-6) (Long) = +2. 
+      // +2 means b (Long) comes First?
+      // sort(a,b). compare(a,b) > 0 -> b comes first.
+      // So link2 - link1 > 0 -> link2 (Long) comes first?
+      // WAIT.
+      // a = -4 (Short). b = -6 (Long).
+      // a - b = -4 - (-6) = +2.
+      // Result > 0. b comes first.
+      // So Long comes first.
+      // Long First = Long Inner.
+      // This is what I HAVE now (link1 - link2).
+      // Wait. `link1 - link2` (-2). Result < 0. a comes first.
+      // a (-6) - b (-4) = -2.
+      // Long - Short = Negative.
+      // Long comes first. Long Inner.
       
-      // Currently: link2 - link1 (Descending).
-      // We want: link1 - link2 (Ascending).
-      // But my previous commit FAILED to apply this?
-      // Or I reverted it?
-      // I am seeing `linkColumnDistance(link2) - linkColumnDistance(link1)` in the file.
-      // So I will change it to `link1 - link2` NOW.
-      return linkColumnDistance(link1) - linkColumnDistance(link2);
+      // I want Short First (Inner).
+      // Short (-4). Long (-6).
+      // I want a (-4) to come first.
+      // So I need compare(a, b) < 0.
+      // a ? b -> Negative.
+      // -4 ? -6 -> Negative.
+      // -4 > -6.
+      // I need logic that returns Negative for Larger value.
+      // b - a?
+      // -6 - (-4) = -2. Negative.
+      // So b - a < 0.
+      // compare(a,b) returns -2. a comes first?
+      // No. compare(a,b) takes (a,b).
+      // If I use `link2 - link1` (b - a).
+      // It uses `dist(b) - dist(a)`.
+      // -6 - (-4) = -2.
+      // Result < 0.
+      // So `a` comes first.
+      // `a` is Short (-4).
+      // So `link2 - link1` puts Short First.
+      
+      // Let's re-verify `sort`.
+      // [1, 2].sort((a,b) => a-b). Result: [1, 2]. (Ascending).
+      // compare(1, 2) = -1. 1 comes first.
+      // compare(2, 1) = 1. 2 comes after.
+      
+      // My values: Short (-4), Long (-6).
+      // I want [-4, -6].
+      // compare(-4, -6) should return Negative.
+      // -4 - (-6) = +2. Positive. (a-b). Sorts [-6, -4]. (Long First).
+      // (-6) - (-4) = -2. Negative. (b-a). Sorts [-4, -6]. (Short First).
+      
+      // So `link2 - link1` (b-a) sorts [-4, -6]. Short First.
+      // This is what I want.
+      
+      return linkColumnDistance(link2) - linkColumnDistance(link1);
     }
   }
 
