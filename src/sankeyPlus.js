@@ -667,6 +667,10 @@ function computeNodeBreadths() {
   const setNodePositions = this.config.nodes.setPositions;
   const id = this.config.id;
 
+  function nodeHeightPx(node) {
+    return (node.value * graph.ky) + (node._circularPortGapPx || 0);
+  }
+
   let columns = groups(graph.nodes, (d) => d.column)
     .sort((a, b) => a[0] - b[0])
     .map((d) => d[1]);
@@ -680,7 +684,9 @@ function computeNodeBreadths() {
       return total + d.value;
     }, 0);
 
-    let preferredTotalGap = graph.y1 - graph.y0 - totalColumnValue * graph.ky;
+    let preferredTotalGap = graph.y1 - graph.y0 - nodes.reduce(function (sum, d) {
+      return sum + (d.virtual ? 0 : nodeHeightPx(d));
+    }, 0);
     
     // Cap the gap to prevent huge spaces when scale is small
     // Maximum gap per node should be reasonable (e.g., 2x nodePadding)
@@ -723,11 +729,12 @@ function computeNodeBreadths() {
 
       nodes.forEach(function (node, i) {
         if (nodes.length == 1) {
-          node.y0 = sankeyExtent.y1 / 2 - node.value * graph.ky;
-          node.y1 = node.y0 + node.value * graph.ky;
+          var h = nodeHeightPx(node);
+          node.y0 = sankeyExtent.y1 / 2 - h / 2;
+          node.y1 = node.y0 + h;
         } else {
           node.y0 = currentY;
-          node.y1 = node.y0 + node.value * graph.ky;
+          node.y1 = node.y0 + nodeHeightPx(node);
           currentY = node.y1 + preferredTotalGap / (nodes.length - 1);
         }
       });
@@ -739,18 +746,22 @@ function computeNodeBreadths() {
             : Number(this.config.nodes.cycleInset) || 0;
         // if the node is in the last column, and is the only node in that column, put it in the centre
         if (node.depth == columns.length - 1 && nodesLength == 1) {
-          node.y0 = graph.y1 / 2 - node.value * graph.ky;
-          node.y1 = node.y0 + node.value * graph.ky;
+          var h = nodeHeightPx(node);
+          node.y0 = graph.y1 / 2 - h / 2;
+          node.y1 = node.y0 + h;
 
           // if the node is in the first column, and is the only node in that column, put it in the centre
         } else if (node.depth == 0 && nodesLength == 1) {
-          node.y0 = graph.y1 / 2 - node.value * graph.ky;
-          node.y1 = node.y0 + node.value * graph.ky;
+          var h2 = nodeHeightPx(node);
+          node.y0 = graph.y1 / 2 - h2 / 2;
+          node.y1 = node.y0 + h2;
         }
 
         // if the node has a circular link
         else if (node.partOfCycle) {
-          let totalNodesHeight = totalColumnValue * graph.ky;
+          let totalNodesHeight = nodes.reduce(function (sum, d) {
+            return sum + (d.virtual ? 0 : nodeHeightPx(d));
+          }, 0);
           let gapPerNode = nodesLength > 1 ? Math.min(nodePadding, (graph.y1 - graph.y0 - totalNodesHeight) / (nodesLength - 1)) : 0;
           if (gapPerNode < 0) gapPerNode = 0;
           
@@ -761,11 +772,11 @@ function computeNodeBreadths() {
           }
           
           if (numberOfNonSelfLinkingCycles(node, id) == 0) {
-            node.y0 = graph.y0 + (graph.y1 - graph.y0) / 2 + i * (node.value * graph.ky + gapPerNode);
-            node.y1 = node.y0 + node.value * graph.ky;
+            node.y0 = graph.y0 + (graph.y1 - graph.y0) / 2 + i * (nodeHeightPx(node) + gapPerNode);
+            node.y1 = node.y0 + nodeHeightPx(node);
           } else if (node.circularLinkType == "top") {
-            node.y0 = graph.y0 + topCyclesBefore * (node.value * graph.ky + gapPerNode) + cycleInset;
-            node.y1 = node.y0 + node.value * graph.ky;
+            node.y0 = graph.y0 + topCyclesBefore * (nodeHeightPx(node) + gapPerNode) + cycleInset;
+            node.y1 = node.y0 + nodeHeightPx(node);
           } else {
             // Place bottom cycle nodes symmetrically to top cycle nodes
             // Calculate total height of all top cycles first for proper mirroring
@@ -773,7 +784,7 @@ function computeNodeBreadths() {
             let topCyclesCount = 0;
             nodes.forEach(function(n) {
               if (n.partOfCycle && n.circularLinkType == "top" && numberOfNonSelfLinkingCycles(n, id) > 0) {
-                totalTopCyclesHeight += n.value * graph.ky;
+                totalTopCyclesHeight += nodeHeightPx(n);
                 topCyclesCount++;
               }
             });
@@ -781,7 +792,7 @@ function computeNodeBreadths() {
             
             // Mirror bottom nodes: if top node is at y0, bottom node should be at (graph.y1 - (y0 - graph.y0) - height)
             // Equivalently: graph.y1 - (topOffset + height) where topOffset is distance from graph.y0
-            let topEquivalentY0 = graph.y0 + bottomCyclesBefore * (node.value * graph.ky + gapPerNode) + cycleInset;
+            let topEquivalentY0 = graph.y0 + bottomCyclesBefore * (nodeHeightPx(node) + gapPerNode) + cycleInset;
             let distanceFromTop = topEquivalentY0 - graph.y0;
             
             // Add extra inset for bottom nodes to bring them closer to center (visual balance)
@@ -792,10 +803,12 @@ function computeNodeBreadths() {
 
             // Mirror it to bottom
             node.y1 = (graph.y1 - bottomInset) - distanceFromTop;
-            node.y0 = node.y1 - node.value * graph.ky;
+            node.y0 = node.y1 - nodeHeightPx(node);
           }
         } else {
-          let totalNodesHeight = totalColumnValue * graph.ky;
+          let totalNodesHeight = nodes.reduce(function (sum, d) {
+            return sum + (d.virtual ? 0 : nodeHeightPx(d));
+          }, 0);
           let availableHeight = graph.y1 - graph.y0;
           let totalGap = availableHeight - totalNodesHeight;
           
@@ -807,10 +820,10 @@ function computeNodeBreadths() {
           let startY = graph.y0 + (availableHeight - totalNodesHeight - totalGap) / 2;
           
           let accumulatedHeight = 0;
-          for (let j = 0; j < i; j++) accumulatedHeight += nodes[j].value * graph.ky + gapPerNode;
+          for (let j = 0; j < i; j++) accumulatedHeight += nodeHeightPx(nodes[j]) + gapPerNode;
           
           node.y0 = startY + accumulatedHeight;
-          node.y1 = node.y0 + node.value * graph.ky;
+          node.y1 = node.y0 + nodeHeightPx(node);
         }
       }, this);
     }
@@ -894,6 +907,10 @@ function resolveCollisionsAndRelax() {
   // For each column, check if nodes are overlapping, and if so, shift up/down
   function resolveCollisions() {
     const baseRadius = this.config.links.circularRadius || 10;
+    const graph = this.graph;
+    function nodeHeightPx(node) {
+      return (node.value * graph.ky) + (node._circularPortGapPx || 0);
+    }
     
     columns.forEach((nodes) => {
       var node,
@@ -916,8 +933,8 @@ function resolveCollisionsAndRelax() {
 
       // Second pass: position nodes with space for self-links
       // Calculate total height needed for nodes and self-links
-      // Use node.value * graph.ky instead of y1 - y0 because nodes may not be positioned yet
-      let totalNodesHeight = nodes.reduce((sum, n) => sum + (n.value * graph.ky), 0);
+      // Include circular port gaps in node heights.
+      let totalNodesHeight = nodes.reduce((sum, n) => sum + (n.virtual ? 0 : nodeHeightPx(n)), 0);
       let totalSelfLinksHeight = nodes.reduce((sum, n) => sum + (n.selfLinksHeight ? n.selfLinksHeight.top + n.selfLinksHeight.bottom : 0), 0);
       let availableHeight = graph.y1 - graph.y0;
       let maxTotalPadding = availableHeight - totalNodesHeight - totalSelfLinksHeight;
@@ -1386,7 +1403,8 @@ class SankeyChart {
       this.config.links.circularLinkPortionTopBottom,
       this.config.links.circularLinkPortionLeftRight,
       this.config.scale,
-      this.config.links.baseRadius
+      this.config.links.baseRadius,
+      Math.max(1, Math.round((this.config.links.circularGap || 5) * 0.2))
     );
 
     

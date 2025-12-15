@@ -10,7 +10,8 @@ export function adjustSankeySize(
   circularLinkPortionTopBottom,
   circularLinkPortionLeftRight,
   scale,
-  baseRadius
+  baseRadius,
+  circularPortGapPx
 ) {
   let graph = inputGraph;
 
@@ -22,9 +23,56 @@ export function adjustSankeySize(
   if (true) {
     graph.py = nodePadding;
 
+    // Compute per-node additional internal height needed for circular port gaps.
+    // This keeps circular links from "spilling" outside the node when we add spacing.
+    var portGap = circularPortGapPx || 0;
+    var nodeById = {};
+    graph.nodes.forEach(function(n) {
+      nodeById[n.index] = n;
+      n._circularPortGapPx = 0;
+    });
+
+    if (portGap > 0) {
+      // Count circular links per node and side (top/bottom) for both outgoing and incoming.
+      var counts = {};
+      graph.links.forEach(function(l) {
+        if (!l.circular) return;
+        if (!l.source || !l.target) return;
+        var sId = l.source.index;
+        var tId = l.target.index;
+        if (counts[sId] === undefined) counts[sId] = { outTop: 0, outBottom: 0, inTop: 0, inBottom: 0 };
+        if (counts[tId] === undefined) counts[tId] = { outTop: 0, outBottom: 0, inTop: 0, inBottom: 0 };
+        if (l.circularLinkType === "bottom") {
+          counts[sId].outBottom++;
+          counts[tId].inBottom++;
+        } else {
+          counts[sId].outTop++;
+          counts[tId].inTop++;
+        }
+      });
+
+      graph.nodes.forEach(function(n) {
+        if (n.virtual) return;
+        var c = counts[n.index] || { outTop: 0, outBottom: 0, inTop: 0, inBottom: 0 };
+        var outGaps = Math.max(0, c.outTop - 1) + Math.max(0, c.outBottom - 1);
+        var inGaps = Math.max(0, c.inTop - 1) + Math.max(0, c.inBottom - 1);
+        // Node must be large enough for both incoming and outgoing port stacks.
+        n._circularPortGapPx = Math.max(outGaps, inGaps) * portGap;
+      });
+    }
+
+    // Keep this accessible for later stages
+    graph.circularPortGapPx = portGap;
+
+    // Compute ky per column, subtracting internal circular port gaps from available height.
     var ky = min(columns, function (nodes) {
+      var totalGapPx = sum(nodes, function(d) {
+        return d.virtual ? 0 : (d._circularPortGapPx || 0);
+      });
+      var available =
+        (graph.y1 - graph.y0 - (nodes.length - 1) * graph.py - totalGapPx);
       return (
-        (graph.y1 - graph.y0 - (nodes.length - 1) * graph.py) /
+        available /
         sum(nodes, function (d) {
           return d.virtual ? 0 : d.value;
         })
