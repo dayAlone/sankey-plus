@@ -87,26 +87,29 @@ export function addCircularPathData(
         }
       } else {
         // else calculate normally
-        // add right extent coordinates.
-        // IMPORTANT: group by the *same source node* (not the whole column), otherwise
-        // unrelated circular links in the same column inflate radii and produce a weird
-        // "horizontal ordering" where even span=0 links become the outermost arcs.
+        // add right extent coordinates, based on links with same source column and circularLink type
+        // (column-level grouping is needed to avoid vertical-leg overlaps for different nodes in same column)
+        var thisColumn = link.source.column;
         var thisCircularLinkType = link.circularLinkType;
         var sameColumnLinks = graph.links.filter(function (l) {
           return (
             l.circular &&
-            l.circularLinkType == thisCircularLinkType &&
-            l.source === link.source
+            l.source.column == thisColumn &&
+            l.circularLinkType == thisCircularLinkType
           );
         });
 
         // Make arc radii consistent with stacking order:
-        // inner (smaller verticalBuffer) first, outer (larger verticalBuffer) last.
+        // inner (shorter span) first, outer (longer span) last.
         sameColumnLinks.sort(function(a, b) {
+          var ad = Math.abs((a.source.column || 0) - (a.target.column || 0));
+          var bd = Math.abs((b.source.column || 0) - (b.target.column || 0));
+          if (ad !== bd) return ad - bd;
+          // tie-breaker: keep stable with current vertical stacking when spans are equal
           var av = a.circularPathData ? a.circularPathData.verticalBuffer : 0;
           var bv = b.circularPathData ? b.circularPathData.verticalBuffer : 0;
           if (av !== bv) return av - bv;
-          return a.circularLinkID - b.circularLinkID;
+          return (a.circularLinkID || 0) - (b.circularLinkID || 0);
         });
 
         var radiusOffset = 0;
@@ -120,22 +123,24 @@ export function addCircularPathData(
           radiusOffset = radiusOffset + l.width;
         });
 
-        // add left extent coordinates.
-        // Same idea: group by the *same target node* (not the whole column) to avoid
-        // unrelated links forcing this link to be wider.
+        // add left extent coordinates, based on links with same target column and circularLink type
+        thisColumn = link.target.column;
         sameColumnLinks = graph.links.filter(function (l) {
           return (
             l.circular &&
-            l.circularLinkType == thisCircularLinkType &&
-            l.target === link.target
+            l.target.column == thisColumn &&
+            l.circularLinkType == thisCircularLinkType
           );
         });
         // Same for target side radii: keep consistent with verticalBuffer stacking.
         sameColumnLinks.sort(function(a, b) {
+          var ad = Math.abs((a.source.column || 0) - (a.target.column || 0));
+          var bd = Math.abs((b.source.column || 0) - (b.target.column || 0));
+          if (ad !== bd) return ad - bd;
           var av = a.circularPathData ? a.circularPathData.verticalBuffer : 0;
           var bv = b.circularPathData ? b.circularPathData.verticalBuffer : 0;
           if (av !== bv) return av - bv;
-          return a.circularLinkID - b.circularLinkID;
+          return (a.circularLinkID || 0) - (b.circularLinkID || 0);
         });
 
         radiusOffset = 0;
