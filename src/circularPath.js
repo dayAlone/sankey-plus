@@ -145,13 +145,33 @@ export function addCircularPathData(
         });
 
         // Use shared group extents computed in calcVerticalBuffer to keep bundles aligned.
-        // Fallback to per-link extents if group values are missing.
-        var relevantMinY = (link.circularPathData && typeof link.circularPathData.groupMinY === "number")
-          ? link.circularPathData.groupMinY
-          : Math.min(link.source.y0, link.target.y0);
-        var relevantMaxY = (link.circularPathData && typeof link.circularPathData.groupMaxY === "number")
-          ? link.circularPathData.groupMaxY
-          : Math.max(link.source.y1, link.target.y1);
+        // BUT: for same-column circular links (source.column === target.column) we want a compact loop
+        // around the two nodes, not an arc sized by the entire column bundle. So for same-column links
+        // we always prefer per-link extents.
+        var sameColumnCircular = link.source && link.target && link.source.column === link.target.column;
+        var relevantMinY;
+        var relevantMaxY;
+
+        if (sameColumnCircular && link.circularPathData) {
+          if (typeof link.circularPathData._extMinY === "number") {
+            relevantMinY = link.circularPathData._extMinY;
+          }
+          if (typeof link.circularPathData._extMaxY === "number") {
+            relevantMaxY = link.circularPathData._extMaxY;
+          }
+        }
+
+        // Fallback / default: group extents when available, otherwise per-link node extents.
+        if (typeof relevantMinY !== "number") {
+          relevantMinY = (link.circularPathData && typeof link.circularPathData.groupMinY === "number")
+            ? link.circularPathData.groupMinY
+            : Math.min(link.source.y0, link.target.y0);
+        }
+        if (typeof relevantMaxY !== "number") {
+          relevantMaxY = (link.circularPathData && typeof link.circularPathData.groupMaxY === "number")
+            ? link.circularPathData.groupMaxY
+            : Math.max(link.source.y1, link.target.y1);
+        }
 
         // Base offset controls how far the circular link "escapes" above/below the main diagram.
         // Use an adaptive value, but cap it to a modest fraction of the diagram height.
