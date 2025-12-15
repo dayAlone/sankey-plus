@@ -444,21 +444,29 @@ export function sortTargetLinks(inputGraph, id) {
           var d1 = Math.abs(link1.target.column - link1.source.column);
           var d2 = Math.abs(link2.target.column - link2.source.column);
           if (d1 !== d2) {
-            // For TARGET-side ordering, keep "nesting" stable: short/local first (inner),
-            // long/distant last (outer). This makes links naturally wrap around each other
-            // instead of crossing ("braid") near the node.
+            // TARGET-side ordering for circular links should primarily reflect
+            // distance to the source node:
+            // - TOP: farther links are "outer" and should enter higher -> distance DESC
+            // - BOTTOM: farther links are "outer" and should enter lower -> distance ASC
+            if (link1.circularLinkType === 'bottom') return d2 - d1;
             return d1 - d2;
+          }
+
+          // If sources are in the same column, keep their vertical order for readability.
+          if (link1.source.column === link2.source.column) {
+            var s1c = (link1.source.y0 + link1.source.y1) / 2;
+            var s2c = (link2.source.y0 + link2.source.y1) / 2;
+            if (s1c !== s2c) return s1c - s2c;
           }
 
           var w1 = link1.width || 0;
           var w2 = link2.width || 0;
           if (w1 !== w2) return w1 - w2;
 
-          // Tie-breaker: keep stable ordering for same-span links.
+          // Final stability tie-breakers
           var s1 = (link1.source.y0 + link1.source.y1) / 2;
           var s2 = (link2.source.y0 + link2.source.y1) / 2;
           if (s1 !== s2) return s1 - s2;
-
           return (link1.index || 0) - (link2.index || 0);
         }
       });
