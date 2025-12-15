@@ -106,3 +106,6 @@ typings/
 
 # TernJS port file
 .tern-port
+
+# Local debug pages (keep local, never commit)
+*debug*.html
