@@ -1003,6 +1003,30 @@ function resolveCollisionsAndRelax() {
           y = node.y0;
         }
       }
+
+      // Symmetric bounds clamp:
+      // The block above can push an entire column upward to fit the bottom, but it does not
+      // re-check that the column still stays within the top bound (graph.y0). This can lead
+      // to some columns having nodes above graph.y0 (visually "higher" than other columns).
+      // Bring the whole column back down if needed, but never so far that we overflow the bottom again.
+      var minY0 = Infinity;
+      var maxY1 = -Infinity;
+      for (i = 0; i < n; ++i) {
+        if (nodes[i].y0 < minY0) minY0 = nodes[i].y0;
+        if (nodes[i].y1 > maxY1) maxY1 = nodes[i].y1;
+      }
+      var needDown = graph.y0 - minY0; // >0 means column starts above the top bound
+      if (needDown > 0) {
+        var canDown = graph.y1 - maxY1; // available space to move down without bottom overflow
+        if (canDown < 0) canDown = 0;
+        var down = Math.min(needDown, canDown);
+        if (down > 0) {
+          for (i = 0; i < n; ++i) {
+            nodes[i].y0 += down;
+            nodes[i].y1 += down;
+          }
+        }
+      }
     });
   }
 
