@@ -317,28 +317,19 @@ export function sortSourceLinks(inputGraph, id, typeOrder, typeAccessor) {
       });
     }
 
-    // update y0 for links
-    var ySourceOffset = node.y0;
-
-    nodesSourceLinks.forEach(function(link, idx) {
-      link.y0 = ySourceOffset + link.width / 2;
-      ySourceOffset = ySourceOffset + link.width;
-    });
-
-    // correct any circular bottom links so they are at the bottom of the node
-    nodesSourceLinks.forEach(function(link, i) {
-      if (link.circularLinkType == 'bottom') {
-        var j = i + 1;
-        var offsetFromBottom = 0;
-        var bottomCountBelow = 0;
-        // sum the widths of any links that are below this link
-        for (j; j < nodeSourceLinksLength; j++) {
-          offsetFromBottom = offsetFromBottom + nodesSourceLinks[j].width;
-          if (nodesSourceLinks[j].circular && nodesSourceLinks[j].circularLinkType == 'bottom') {
-            bottomCountBelow++;
-          }
-        }
-        link.y0 = node.y1 - offsetFromBottom - link.width / 2;
+    // Assign y0 ports using two bands:
+    // - TOP links stack from node.y0 downward
+    // - BOTTOM links stack from node.y1 upward
+    // This prevents top/bottom circular links from interleaving (which causes crossings).
+    var ySourceTop = node.y0;
+    var ySourceBottom = node.y1;
+    nodesSourceLinks.forEach(function(link) {
+      if (link.circular && link.circularLinkType === 'bottom') {
+        link.y0 = ySourceBottom - link.width / 2;
+        ySourceBottom -= link.width;
+      } else {
+        link.y0 = ySourceTop + link.width / 2;
+        ySourceTop += link.width;
       }
     });
   });
@@ -484,29 +475,19 @@ export function sortTargetLinks(inputGraph, id, typeOrder, typeAccessor) {
       });
     }
 
-    // update y1 for links
-    var yTargetOffset = node.y0;
-
-    nodesTargetLinks.forEach(function(link, idx) {
-      link.y1 = yTargetOffset + link.width / 2;
-      yTargetOffset = yTargetOffset + link.width;
-      var next = nodesTargetLinks[idx + 1];
-    });
-
-    // correct any circular bottom links so they are at the bottom of the node
-    nodesTargetLinks.forEach(function(link, i) {
-      if (link.circularLinkType == 'bottom') {
-        var j = i + 1;
-        var offsetFromBottom = 0;
-        var bottomCountBelow = 0;
-        // sum the widths of any links that are below this link
-        for (j; j < nodesTargetLinksLength; j++) {
-          offsetFromBottom = offsetFromBottom + nodesTargetLinks[j].width;
-          if (nodesTargetLinks[j].circular && nodesTargetLinks[j].circularLinkType == 'bottom') {
-            bottomCountBelow++;
-          }
-        }
-        link.y1 = node.y1 - offsetFromBottom - link.width / 2;
+    // Assign y1 ports using two bands:
+    // - TOP links stack from node.y0 downward
+    // - BOTTOM links stack from node.y1 upward
+    // This prevents top/bottom circular links from interleaving (which causes crossings).
+    var yTargetTop = node.y0;
+    var yTargetBottom = node.y1;
+    nodesTargetLinks.forEach(function(link) {
+      if (link.circular && link.circularLinkType === 'bottom') {
+        link.y1 = yTargetBottom - link.width / 2;
+        yTargetBottom -= link.width;
+      } else {
+        link.y1 = yTargetTop + link.width / 2;
+        yTargetTop += link.width;
       }
     });
   });
