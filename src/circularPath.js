@@ -638,6 +638,9 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
               offsetCorrection = thisBaseY - prevBaseY;
             }
           }
+          // Offset correction is meant to *reduce* required buffer when baseYs are naturally separated.
+          // It should never INCREASE buffer (that creates huge "holes" between stacked top links).
+          if (offsetCorrection > 0) offsetCorrection = 0;
           
           bufferOverThisLink += offsetCorrection;
           buffer = bufferOverThisLink > buffer ? bufferOverThisLink : buffer;
@@ -699,6 +702,8 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
               offsetCorrection = thisBaseY - prevBaseY;
             }
           }
+          // Only allow offsetCorrection to reduce the buffer requirement.
+          if (offsetCorrection > 0) offsetCorrection = 0;
           
           bufferOverThisLink += offsetCorrection;
           if (bufferOverThisLink > buffer) {
