@@ -317,14 +317,18 @@ export function sortSourceLinks(inputGraph, id, typeOrder, typeAccessor) {
       });
     }
 
-    // Assign y0 ports using two bands:
-    // - TOP links stack from node.y0 downward
-    // - BOTTOM links stack from node.y1 upward
-    // This prevents top/bottom circular links from interleaving (which causes crossings).
+    // Assign y0 ports using two non-overlapping bands:
+    // - Non-bottom links stack in [node.y0, node.y1 - bottomWidthTotal]
+    // - Bottom circular links stack in [node.y1 - bottomWidthTotal, node.y1]
+    // This guarantees TOP/BOTTOM separation regardless of link ordering.
+    var bottomWidthTotal0 = 0;
+    nodesSourceLinks.forEach(function (l) {
+      if (l && l.circular && l.circularLinkType === "bottom") bottomWidthTotal0 += l.width || 0;
+    });
     var ySourceTop = node.y0;
     var ySourceBottom = node.y1;
-    nodesSourceLinks.forEach(function(link) {
-      if (link.circular && link.circularLinkType === 'bottom') {
+    nodesSourceLinks.forEach(function (link) {
+      if (link.circular && link.circularLinkType === "bottom") {
         link.y0 = ySourceBottom - link.width / 2;
         ySourceBottom -= link.width;
       } else {
@@ -475,14 +479,18 @@ export function sortTargetLinks(inputGraph, id, typeOrder, typeAccessor) {
       });
     }
 
-    // Assign y1 ports using two bands:
-    // - TOP links stack from node.y0 downward
-    // - BOTTOM links stack from node.y1 upward
-    // This prevents top/bottom circular links from interleaving (which causes crossings).
+    // Assign y1 ports using two non-overlapping bands:
+    // - Non-bottom links stack in [node.y0, node.y1 - bottomWidthTotal]
+    // - Bottom circular links stack in [node.y1 - bottomWidthTotal, node.y1]
+    // This guarantees TOP/BOTTOM separation regardless of link ordering.
+    var bottomWidthTotal1 = 0;
+    nodesTargetLinks.forEach(function (l) {
+      if (l && l.circular && l.circularLinkType === "bottom") bottomWidthTotal1 += l.width || 0;
+    });
     var yTargetTop = node.y0;
     var yTargetBottom = node.y1;
-    nodesTargetLinks.forEach(function(link) {
-      if (link.circular && link.circularLinkType === 'bottom') {
+    nodesTargetLinks.forEach(function (link) {
+      if (link.circular && link.circularLinkType === "bottom") {
         link.y1 = yTargetBottom - link.width / 2;
         yTargetBottom -= link.width;
       } else {
