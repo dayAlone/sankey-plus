@@ -1624,17 +1624,43 @@ class SankeyChart {
         cols[c].push(n);
       });
 
+      // Compute a common "top-cycle baseline" so columns with top cycle nodes don't drift
+      // upward relative to other top-cycle columns (this is what makes e.g. `sosisa ○` sit above
+      // `search ○/◐/...` even though they are all top-cycle nodes).
+      var baselineTopCycleY = -Infinity;
+      Object.keys(cols).forEach(function (c) {
+        var nodes = cols[c];
+        if (!nodes || !nodes.length) return;
+        var minTopCycle = Infinity;
+        nodes.forEach(function (n) {
+          if (n && n.partOfCycle && n.circularLinkType === "top") {
+            // Only count "real" cycle participants (exclude pure self-loop-only)
+            if (numberOfNonSelfLinkingCycles(n, chart.config.id) > 0) {
+              if (n.y0 < minTopCycle) minTopCycle = n.y0;
+            }
+          }
+        });
+        if (minTopCycle < Infinity) baselineTopCycleY = Math.max(baselineTopCycleY, minTopCycle);
+      });
+      if (!isFinite(baselineTopCycleY)) baselineTopCycleY = graph.y0;
+
       Object.keys(cols).forEach(function (c) {
         var nodes = cols[c];
         if (!nodes || !nodes.length) return;
         var minY0 = Infinity;
         var maxY1 = -Infinity;
+        var hasTopCycle = false;
         nodes.forEach(function (n) {
           if (n.y0 < minY0) minY0 = n.y0;
           if (n.y1 > maxY1) maxY1 = n.y1;
+          if (n && n.partOfCycle && n.circularLinkType === "top" && numberOfNonSelfLinkingCycles(n, chart.config.id) > 0) {
+            hasTopCycle = true;
+          }
         });
 
-        var lowerShift = graph.y0 - minY0;
+        // For columns with top-cycle nodes, enforce a shared baseline to avoid drifting upward.
+        var targetTop = hasTopCycle ? Math.max(graph.y0, baselineTopCycleY) : graph.y0;
+        var lowerShift = targetTop - minY0;
         var upperShift = graph.y1 - maxY1;
         var shift = 0;
         if (lowerShift <= upperShift) {
