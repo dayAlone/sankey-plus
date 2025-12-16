@@ -1448,6 +1448,35 @@ class SankeyChart {
 
     this.graph = straigtenVirtualNodes(this.graph);
 
+    // Optional debug: enable targeted circular-link logs via query params.
+    // Example: `?debugCircular=1&debugCircularIdx=32,62`
+    try {
+      if (typeof window !== "undefined" && window.location && window.location.search) {
+        var sp = new URLSearchParams(window.location.search);
+        if (sp.get("debugCircular") === "1") {
+          var raw = sp.get("debugCircularIdx") || "";
+          var ids = raw
+            .split(",")
+            .map((s) => Number(String(s).trim()))
+            .filter((n) => Number.isFinite(n));
+          if (ids.length) {
+            this.graph.links.forEach(function (l) {
+              if (l && typeof l.index === "number" && ids.indexOf(l.index) !== -1) {
+                l._debugCircular = true;
+              }
+            });
+          } else {
+            // If no specific indices provided, enable debug for all circular links (noisy).
+            this.graph.links.forEach(function (l) {
+              if (l && l.circular) l._debugCircular = true;
+            });
+          }
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+
     this.graph = addCircularPathData(
       this.graph,
       this.config.id,

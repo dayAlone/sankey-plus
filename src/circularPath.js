@@ -251,13 +251,7 @@ export function addCircularPathData(
         // Modest cap (~15% of diagram height) to avoid huge gaps while still allowing escape.
         var maxAllowedBaseOffset = Math.max(verticalMargin, (graph.y1 - graph.y0) * 0.15);
         var baseOffset = Math.min(desiredBaseOffset, maxAllowedBaseOffset);
-        // Record if we hit the cap: used later to tighten corner radii ONLY when the
-        // link is constrained by the boundary (prevents shrinking every link).
-        if (link.circularPathData) {
-          link.circularPathData._desiredBaseOffset = desiredBaseOffset;
-          link.circularPathData._maxAllowedBaseOffset = maxAllowedBaseOffset;
-          link.circularPathData._baseOffsetCapped = desiredBaseOffset > maxAllowedBaseOffset + 1e-6;
-        }
+        link.circularPathData.baseOffset = baseOffset;
         // IMPORTANT: do NOT force all links in a bundle to share the same verticalBuffer.
         // That makes them collapse onto one horizontal line (same verticalFullExtent).
         // Group alignment should be handled via groupMinY/groupMaxY (baseOffset sizing),
@@ -284,6 +278,25 @@ export function addCircularPathData(
           link.circularPathData.verticalLeftInnerExtent =
             link.circularPathData.verticalFullExtent +
             link.circularPathData.leftLargeArcRadius;
+        }
+
+        if (link._debugCircular) {
+          console.log("[circular/extents]", (link.source && link.source.name) + "->" + (link.target && link.target.name) + " (#" + link.index + ")", {
+            type: link.circularLinkType,
+            span: Math.abs((link.source.column || 0) - (link.target.column || 0)),
+            width: link.width,
+            relevantMinY: relevantMinY,
+            relevantMaxY: relevantMaxY,
+            groupMinY: link.circularPathData.groupMinY,
+            groupMaxY: link.circularPathData.groupMaxY,
+            columnHeight: columnHeight,
+            desiredBaseOffset: desiredBaseOffset,
+            maxAllowedBaseOffset: maxAllowedBaseOffset,
+            baseOffset: baseOffset,
+            vBuf: link.circularPathData.verticalBuffer,
+            totalOffset: totalOffset,
+            verticalFullExtent: link.circularPathData.verticalFullExtent
+          });
         }
       }
 
@@ -373,69 +386,21 @@ export function addCircularPathData(
     });
   });
 
-  // Corner tightening ONLY when the link is boundary-constrained (baseOffset capped).
-  // This targets the visually bloated RIGHT corner (top-right for TOP links, bottom-right for BOTTOM links)
-  // without collapsing the spacing for all circular links.
-  graph.links.forEach(function(l) {
-    if (!l.circular) return;
-    if (selfLinking(l, id)) return;
-    if (!l.circularPathData) return;
-    var c = l.circularPathData;
-    if (!c._baseOffsetCapped) return;
-
-    var desired = c._desiredBaseOffset || 0;
-    var maxAllowed = c._maxAllowedBaseOffset || 0;
-    if (!(desired > 1e-6) || !(maxAllowed > 1e-6)) return;
-
-    // Ratio < 1 means we hit the cap. Smaller ratio => more constrained => tighter corner.
-    var ratio = maxAllowed / desired;
-    // Don't over-tighten; keep some curvature to avoid square-ish artifacts.
-    ratio = Math.max(0.6, Math.min(1, ratio));
-
-    var minR = baseRadius + (l.width || 0) / 2;
-    if (typeof c.rightLargeArcRadius === "number") {
-      c.rightLargeArcRadius = minR + (c.rightLargeArcRadius - minR) * ratio;
-    }
-    if (typeof c.rightSmallArcRadius === "number") {
-      c.rightSmallArcRadius = minR + (c.rightSmallArcRadius - minR) * ratio;
-    }
-    if (
-      typeof c.rightLargeArcRadius === "number" &&
-      typeof c.rightSmallArcRadius === "number" &&
-      c.rightSmallArcRadius > c.rightLargeArcRadius
-    ) {
-      c.rightSmallArcRadius = c.rightLargeArcRadius;
-    }
-  });
-
-  // After any radii post-processing, recompute dependent extents and path strings.
-  graph.links.forEach(function(link) {
-    if (!link.circular || !link.circularPathData) return;
-    var c = link.circularPathData;
-
-    // Update vertical inner extents (depend on large radii).
-    if (link.circularLinkType === "bottom") {
-      c.verticalRightInnerExtent = c.verticalFullExtent - c.rightLargeArcRadius;
-      c.verticalLeftInnerExtent = c.verticalFullExtent - c.leftLargeArcRadius;
-    } else {
-      c.verticalRightInnerExtent = c.verticalFullExtent + c.rightLargeArcRadius;
-      c.verticalLeftInnerExtent = c.verticalFullExtent + c.leftLargeArcRadius;
-    }
-
-    // Update horizontal extents (depend on large radii).
-    c.rightInnerExtent = c.sourceX + c.rightNodeBuffer;
-    c.leftInnerExtent = c.targetX - c.leftNodeBuffer;
-    c.rightFullExtent = c.sourceX + c.rightLargeArcRadius + c.rightNodeBuffer;
-    c.leftFullExtent = c.targetX - c.leftLargeArcRadius - c.leftNodeBuffer;
-
-    link.path = createCircularPathString(link);
-  });
-
   return graph;
 }
 
 // creates vertical buffer values per set of top/bottom links
 function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
+  function dbg(link) {
+    return !!(link && link._debugCircular);
+  }
+  function nameOf(link) {
+    if (!link) return "?";
+    var s = link.source && (link.source.name || link.source.index);
+    var t = link.target && (link.target.name || link.target.index);
+    return String(s) + "->" + String(t) + " (#" + String(link.index) + ")";
+  }
+
   // Pre-calculate base Y for each link to optimize collision logic
   links.forEach(function(link) {
     var ext = getLinkBaseExtents(link, nodes);
@@ -622,6 +587,7 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
     var buffer = 0;
     var srcName = link.source.name || link.source.index;
     var tgtName = link.target.name || link.target.index;
+    var maxCause = null; // { j, prev, gap, offsetCorrection, bufferOver }
 
     // Find current group
     var currentGroupIndex = orderedGroups.findIndex(function(g) {
@@ -735,15 +701,52 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
           }
           
           bufferOverThisLink += offsetCorrection;
-
-          console.log(`  [${i}] ${srcName}->${tgtName} CROSSES [${j}] ${prevSrcName}->${prevTgtName}, gap=${gap}, buf=${bufferOverThisLink.toFixed(2)}`);
-
-          buffer = bufferOverThisLink > buffer ? bufferOverThisLink : buffer;
+          if (bufferOverThisLink > buffer) {
+            buffer = bufferOverThisLink;
+            maxCause = { j: j, prev: prevLink, gap: gap, offsetCorrection: offsetCorrection, bufferOver: bufferOverThisLink };
+          }
+          if (dbg(link) || dbg(prevLink)) {
+            console.log(
+              "[circular/vBuf] link",
+              nameOf(link),
+              "crosses",
+              nameOf(prevLink),
+              {
+                gap: gap,
+                offsetCorrection: offsetCorrection,
+                prevVB: prevLink.circularPathData.verticalBuffer,
+                prevW: prevLink.width,
+                baseY: link.circularPathData.baseY,
+                prevBaseY: prevLink.circularPathData.baseY,
+                bufferOver: +bufferOverThisLink.toFixed(2),
+              }
+            );
+          }
         }
       }
 
       link.circularPathData.verticalBuffer = buffer + link.width / 2;
-      console.log(`  => [${i}] ${srcName}->${tgtName} final vBuf = ${link.circularPathData.verticalBuffer.toFixed(2)}`);
+      if (dbg(link)) {
+        console.log(
+          "[circular/vBuf] FINAL",
+          nameOf(link),
+          {
+            vBuf: +link.circularPathData.verticalBuffer.toFixed(2),
+            baseY: link.circularPathData.baseY,
+            groupMinY: link.circularPathData.groupMinY,
+            groupMaxY: link.circularPathData.groupMaxY,
+            maxCause: maxCause
+              ? {
+                  prev: nameOf(maxCause.prev),
+                  j: maxCause.j,
+                  gap: maxCause.gap,
+                  offsetCorrection: maxCause.offsetCorrection,
+                  bufferOver: +maxCause.bufferOver.toFixed(2),
+                }
+              : null,
+          }
+        );
+      }
     }
   });
 
