@@ -317,24 +317,26 @@ export function sortSourceLinks(inputGraph, id, typeOrder, typeAccessor) {
       });
     }
 
-    // Assign y0 ports using two non-overlapping bands:
-    // - Non-bottom links stack in [node.y0, node.y1 - bottomWidthTotal]
-    // - Bottom circular links stack in [node.y1 - bottomWidthTotal, node.y1]
-    // This guarantees TOP/BOTTOM separation regardless of link ordering.
-    var bottomWidthTotal0 = 0;
-    nodesSourceLinks.forEach(function (l) {
-      if (l && l.circular && l.circularLinkType === "bottom") bottomWidthTotal0 += l.width || 0;
-    });
-    var ySourceTop = node.y0;
-    var ySourceBottom = node.y1;
+    // Assign y0 ports using two explicit bands (no interleaving):
+    // - TOP band: all non-bottom links (including top circular + non-circular)
+    // - BOTTOM band: bottom circular links
+    var topBand0 = [];
+    var bottomBand0 = [];
     nodesSourceLinks.forEach(function (link) {
-      if (link.circular && link.circularLinkType === "bottom") {
-        link.y0 = ySourceBottom - link.width / 2;
-        ySourceBottom -= link.width;
-      } else {
-        link.y0 = ySourceTop + link.width / 2;
-        ySourceTop += link.width;
-      }
+      if (link.circular && link.circularLinkType === "bottom") bottomBand0.push(link);
+      else topBand0.push(link);
+    });
+
+    var ySourceTop = node.y0;
+    topBand0.forEach(function (link) {
+      link.y0 = ySourceTop + link.width / 2;
+      ySourceTop += link.width;
+    });
+
+    var ySourceBottom = node.y1;
+    bottomBand0.forEach(function (link) {
+      link.y0 = ySourceBottom - link.width / 2;
+      ySourceBottom -= link.width;
     });
   });
 
@@ -479,24 +481,26 @@ export function sortTargetLinks(inputGraph, id, typeOrder, typeAccessor) {
       });
     }
 
-    // Assign y1 ports using two non-overlapping bands:
-    // - Non-bottom links stack in [node.y0, node.y1 - bottomWidthTotal]
-    // - Bottom circular links stack in [node.y1 - bottomWidthTotal, node.y1]
-    // This guarantees TOP/BOTTOM separation regardless of link ordering.
-    var bottomWidthTotal1 = 0;
-    nodesTargetLinks.forEach(function (l) {
-      if (l && l.circular && l.circularLinkType === "bottom") bottomWidthTotal1 += l.width || 0;
-    });
-    var yTargetTop = node.y0;
-    var yTargetBottom = node.y1;
+    // Assign y1 ports using two explicit bands (no interleaving):
+    // - TOP band: all non-bottom links (including top circular + non-circular)
+    // - BOTTOM band: bottom circular links
+    var topBand1 = [];
+    var bottomBand1 = [];
     nodesTargetLinks.forEach(function (link) {
-      if (link.circular && link.circularLinkType === "bottom") {
-        link.y1 = yTargetBottom - link.width / 2;
-        yTargetBottom -= link.width;
-      } else {
-        link.y1 = yTargetTop + link.width / 2;
-        yTargetTop += link.width;
-      }
+      if (link.circular && link.circularLinkType === "bottom") bottomBand1.push(link);
+      else topBand1.push(link);
+    });
+
+    var yTargetTop = node.y0;
+    topBand1.forEach(function (link) {
+      link.y1 = yTargetTop + link.width / 2;
+      yTargetTop += link.width;
+    });
+
+    var yTargetBottom = node.y1;
+    bottomBand1.forEach(function (link) {
+      link.y1 = yTargetBottom - link.width / 2;
+      yTargetBottom -= link.width;
     });
   });
 
