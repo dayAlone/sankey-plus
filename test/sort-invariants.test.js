@@ -7,28 +7,33 @@ globalThis.self = globalThis;
 
 const { SankeyChart } = require(path.join("..", "dist", "sankeyPlus.js"));
 
-const links = require(path.join("..", "test-debug-links.json"));
-
+// Minimal test data with circular links
 const nodes = [
-  { name: "path_start", horizontalSort: 0, verticalSort: 0 },
-  { name: "search ○", horizontalSort: 1, verticalSort: 0 },
-  { name: "search ◐", horizontalSort: 2, verticalSort: 0 },
-  { name: "search ●", horizontalSort: 3, verticalSort: 0 },
-  { name: "saved_filters_search ●", horizontalSort: 3, verticalSort: 1 },
-  { name: "filter", horizontalSort: 5, verticalSort: 3 },
-  { name: "autosearch", horizontalSort: 5, verticalSort: 2 },
-  { name: "listing ○", horizontalSort: 5, verticalSort: 1 },
-  { name: "filter off", horizontalSort: 5, verticalSort: 0 },
-  { name: "schedule ○", horizontalSort: 6, verticalSort: 0 },
-  { name: "sosisa ○", horizontalSort: 7, verticalSort: 0 },
-  { name: "sharing", horizontalSort: 7, verticalSort: 0 },
-  { name: "subscription", horizontalSort: 7, verticalSort: 0 },
-  { name: "schedule ◐", horizontalSort: 8, verticalSort: 0 },
-  { name: "schedule ●", horizontalSort: 8, verticalSort: 1 },
-  { name: "sosisa ◐", horizontalSort: 10, verticalSort: 1 },
-  { name: "listing ●", horizontalSort: 10, verticalSort: -2 },
-  { name: "sosisa ●", horizontalSort: 11, verticalSort: 3 },
-  { name: "done", horizontalSort: 12, verticalSort: 0 },
+  { name: "A", horizontalSort: 0, verticalSort: 0 },
+  { name: "B", horizontalSort: 1, verticalSort: 0 },
+  { name: "C", horizontalSort: 2, verticalSort: 0 },
+  { name: "D", horizontalSort: 2, verticalSort: 1 },
+  { name: "E", horizontalSort: 3, verticalSort: 0 },
+];
+
+const links = [
+  // Forward flow
+  { source: "A", target: "B", value: 10, type: "primary" },
+  { source: "B", target: "C", value: 8, type: "primary" },
+  { source: "B", target: "D", value: 2, type: "primary" },
+  { source: "C", target: "E", value: 5, type: "primary" },
+  { source: "D", target: "E", value: 2, type: "primary" },
+  // Circular/backlinks - create various scenarios
+  { source: "B", target: "A", value: 1, type: "secondary" },  // backward span=1
+  { source: "C", target: "A", value: 1, type: "secondary" },  // backward span=2
+  { source: "C", target: "B", value: 2, type: "secondary" },  // backward span=1
+  { source: "D", target: "B", value: 1, type: "secondary" },  // backward span=1 (cross-type)
+  { source: "E", target: "C", value: 1, type: "secondary" },  // backward span=1
+  { source: "E", target: "D", value: 1, type: "secondary" },  // backward span=1
+  { source: "E", target: "B", value: 1, type: "secondary" },  // backward span=2
+  // Self-loops
+  { source: "B", target: "B", value: 1, type: "primary" },
+  { source: "C", target: "C", value: 1, type: "primary" },
 ];
 
 function makeChart() {
@@ -67,7 +72,7 @@ function makeChart() {
       color: "lightgrey",
       sortIterations: 12,
       postSortIterations: 4,
-      typeOrder: ["search_loop", "primary", "secondary", "search_nearby"],
+      typeOrder: ["primary", "secondary"],
       typeAccessor: (d) => d.type,
       types: {},
     },
