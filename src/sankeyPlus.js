@@ -233,6 +233,7 @@ function selectCircularLinkTypes(inputGraph, id) {
   // For very local backward links (span=1), routing them BELOW usually reduces crossings
   // because they sit under the dense TOP bundles. This matches the UX expectation for
   // "between two adjacent columns" backlinks.
+  // EXCEPTION: If target is significantly ABOVE source, route TOP (more natural path).
   graph.links.forEach(function (link) {
     if (!link.circular || selfLinking(link, id)) return;
     if (link._forcedCircularLinkType) return;
@@ -248,7 +249,13 @@ function selectCircularLinkTypes(inputGraph, id) {
     var tgtH = (link.target.y1 - link.target.y0) || 0;
     var localThreshold = Math.max(srcH, tgtH); // "nearby" in the same band of the diagram
 
-    if (Math.abs(targetCenter - sourceCenter) <= localThreshold) {
+    // If target is above source, prefer TOP routing (shorter path going up)
+    var targetAbove = targetCenter < sourceCenter;
+    if (targetAbove) {
+      link.circularLinkType = "top";
+      link._forcedCircularLinkType = "top";
+    } else if (Math.abs(targetCenter - sourceCenter) <= localThreshold) {
+      // Target is below or at same level, and nearby - route BOTTOM
       link.circularLinkType = "bottom";
       link._forcedCircularLinkType = "bottom";
     }
@@ -379,6 +386,56 @@ function selectCircularLinkTypes(inputGraph, id) {
     var chosen = candidates[0];
     chosen.circularLinkType = "bottom";
     chosen._forcedCircularLinkType = "bottom";
+  });
+
+  // Column→Target consistency for backlinks:
+  // For backlinks coming FROM the same source column INTO the same target node,
+  // route them all on the SAME side (top/bottom). Mixing sides within the same
+  // (source column, target) bundle creates confusing near-node weaving.
+  //
+  // We pick the side by weighted majority (link.value) of the current assignment,
+  // while respecting any explicit _forcedCircularLinkType decisions.
+  var nonSelfBacklinks = graph.links.filter(function (l) {
+    if (!l || !l.circular) return false;
+    if (selfLinking(l, id)) return false;
+    var sc = l.source && typeof l.source.column === "number" ? l.source.column : 0;
+    var tc = l.target && typeof l.target.column === "number" ? l.target.column : 0;
+    return tc < sc; // backlink
+  });
+  var backlinksByColTarget = groups(nonSelfBacklinks, function (l) {
+    return String(l.source.column) + "|" + getNodeID(l.target, id);
+  });
+
+  backlinksByColTarget.forEach(function (pair) {
+    var links = pair[1];
+    if (!links || links.length < 2) return;
+
+    // If there are forced types and they conflict, don't override.
+    var forcedType = null;
+    for (var i = 0; i < links.length; i++) {
+      if (links[i] && links[i]._forcedCircularLinkType) {
+        if (forcedType && forcedType !== links[i]._forcedCircularLinkType) return;
+        forcedType = links[i]._forcedCircularLinkType;
+      }
+    }
+
+    var preferred = forcedType;
+    if (!preferred) {
+      var topW = 0;
+      var bottomW = 0;
+      for (var j = 0; j < links.length; j++) {
+        var l = links[j];
+        var w = l && typeof l.value === "number" ? l.value : 0;
+        if (l.circularLinkType === "top") topW += w;
+        else bottomW += w;
+      }
+      preferred = topW >= bottomW ? "top" : "bottom";
+    }
+
+    for (var k = 0; k < links.length; k++) {
+      if (!links[k] || links[k]._forcedCircularLinkType) continue;
+      links[k].circularLinkType = preferred;
+    }
   });
   
   // Second pass: determine types for self-links based on other circular links of the same node
@@ -743,7 +800,17 @@ function computeNodeBreadths() {
       }
     };
 
-    const customSort = (a, b) =>  b.verticalSort - a.verticalSort;    
+    // Custom sort: primary by verticalSort, secondary: non-cycle nodes first
+    // This prevents TOP cycle nodes from dominating top positions when verticalSort is equal.
+    const customSort = (a, b) => {
+      var vs = b.verticalSort - a.verticalSort;
+      if (vs !== 0) return vs;
+      // When verticalSort is equal, put non-cycle nodes before cycle nodes
+      // This helps cycle nodes settle toward middle instead of top
+      if (a.partOfCycle && !b.partOfCycle) return 1;
+      if (!a.partOfCycle && b.partOfCycle) return -1;
+      return 0;
+    };
 
     this.config.nodes.verticalSort 
     ? nodes.sort(customSort)        // use custom values for sorting
@@ -780,51 +847,41 @@ function computeNodeBreadths() {
           var h2 = nodeHeightPx(node);
           node.y0 = graph.y1 / 2 - h2 / 2;
           node.y1 = node.y0 + h2;
+        } else if (nodesLength == 1) {
+          // Single-node columns (common with circular graphs) are best initialized at center.
+          // Otherwise the cycle-placement heuristics can pin an isolated node to extreme top/bottom,
+          // and relaxation may not recover it cleanly.
+          var h3 = nodeHeightPx(node);
+          node.y0 = graph.y0 + (graph.y1 - graph.y0) / 2 - h3 / 2;
+          node.y1 = node.y0 + h3;
         }
 
         // if the node has a circular link
+        // NOTE: We no longer pin TOP/BOTTOM cycle nodes to the chart extremes.
+        // This caused nodes like sosisa ○ to be placed too high and not relax properly.
+        // Instead, treat cycle nodes like non-cycle nodes (centered placement) and let
+        // relaxation + collision resolution handle their final positions.
+        // The circular arc clearance is handled by adjustGraphExtents() later.
         else if (node.partOfCycle) {
+          // Use the same centered placement as non-cycle nodes
           let totalNodesHeight = nodes.reduce(function (sum, d) {
             return sum + (d.virtual ? 0 : nodeHeightPx(d));
           }, 0);
-          let gapPerNode = nodesLength > 1 ? Math.min(nodePadding, (graph.y1 - graph.y0 - totalNodesHeight) / (nodesLength - 1)) : 0;
-          if (gapPerNode < 0) gapPerNode = 0;
+          let availableHeight = graph.y1 - graph.y0;
+          let totalGap = availableHeight - totalNodesHeight;
           
-          let topCyclesBefore = 0, bottomCyclesBefore = 0;
-          for (let j = 0; j < i; j++) {
-            if (nodes[j].partOfCycle && nodes[j].circularLinkType == "top") topCyclesBefore++;
-            if (nodes[j].partOfCycle && nodes[j].circularLinkType == "bottom") bottomCyclesBefore++;
-          }
+          let maxGapPerNode = nodePadding;
+          if (totalGap > maxGapPerNode * (nodesLength - 1)) totalGap = maxGapPerNode * (nodesLength - 1);
+          if (totalGap < 0) totalGap = 0;
           
-          if (numberOfNonSelfLinkingCycles(node, id) == 0) {
-            node.y0 = graph.y0 + (graph.y1 - graph.y0) / 2 + i * (nodeHeightPx(node) + gapPerNode);
-            node.y1 = node.y0 + nodeHeightPx(node);
-          } else if (node.circularLinkType == "top") {
-            node.y0 = graph.y0 + topCyclesBefore * (nodeHeightPx(node) + gapPerNode) + cycleInset;
-            node.y1 = node.y0 + nodeHeightPx(node);
-          } else {
-            // Place bottom cycle nodes symmetrically to top cycle nodes
-            // Calculate total height of all top cycles first for proper mirroring
-            let totalTopCyclesHeight = 0;
-            let topCyclesCount = 0;
-            nodes.forEach(function(n) {
-              if (n.partOfCycle && n.circularLinkType == "top" && numberOfNonSelfLinkingCycles(n, id) > 0) {
-                totalTopCyclesHeight += nodeHeightPx(n);
-                topCyclesCount++;
-              }
-            });
-            let totalTopGaps = topCyclesCount > 1 ? gapPerNode * (topCyclesCount - 1) : 0;
-            
-            // Mirror bottom nodes: if top node is at y0, bottom node should be at (graph.y1 - (y0 - graph.y0) - height)
-            // Equivalently: graph.y1 - (topOffset + height) where topOffset is distance from graph.y0
-            let topEquivalentY0 = graph.y0 + bottomCyclesBefore * (nodeHeightPx(node) + gapPerNode) + cycleInset;
-            let distanceFromTop = topEquivalentY0 - graph.y0;
-            
-            // Mirror it to bottom (true symmetry). Avoid extra "bottomInset" lifting, which
-            // can cause bottom-cycle nodes to drift upward above other columns.
-            node.y1 = graph.y1 - distanceFromTop;
-            node.y0 = node.y1 - nodeHeightPx(node);
-          }
+          let gapPerNode = nodesLength > 1 ? totalGap / (nodesLength - 1) : 0;
+          let startY = graph.y0 + (availableHeight - totalNodesHeight - totalGap) / 2;
+          
+          let accumulatedHeight = 0;
+          for (let j = 0; j < i; j++) accumulatedHeight += nodeHeightPx(nodes[j]) + gapPerNode;
+          
+          node.y0 = startY + accumulatedHeight + cycleInset;
+          node.y1 = node.y0 + nodeHeightPx(node);
         } else {
           let totalNodesHeight = nodes.reduce(function (sum, d) {
             return sum + (d.virtual ? 0 : nodeHeightPx(d));
@@ -859,6 +916,31 @@ function resolveCollisionsAndRelax() {
   const nodePadding = this.config.nodes.padding;
   const minNodePadding = this.config.nodes.minPadding;
   const iterations = this.config.iterations;
+  const circularRelaxationWeight =
+    typeof this.config.nodes.circularRelaxationWeight === "number"
+      ? this.config.nodes.circularRelaxationWeight
+      : 0;
+
+  // When using virtual routes, long-span links are split into multiple virtual segments.
+  // If we use raw link.value per segment during relaxation, long links get overweighted
+  // (value is effectively multiplied by number of segments), which can stretch the layout.
+  // Normalize virtual segment weights by chain length.
+  var virtualChainLenByParent = null;
+  try {
+    if (graph && Array.isArray(graph.links)) {
+      var counts = new Map();
+      for (var vi = 0; vi < graph.links.length; vi++) {
+        var lnk = graph.links[vi];
+        if (lnk && lnk.linkType === "virtual" && lnk.parentLink != null) {
+          var key = lnk.parentLink;
+          counts.set(key, (counts.get(key) || 0) + 1);
+        }
+      }
+      virtualChainLenByParent = counts;
+    }
+  } catch (e) {
+    virtualChainLenByParent = null;
+  }
 
   let columns = groups(graph.nodes, (d) => d.column)
     .sort((a, b) => a[0] - b[0])
@@ -884,18 +966,20 @@ function resolveCollisionsAndRelax() {
         // check the node is not an orphan
         var nodeHeight;
         if (node.sourceLinks.length || node.targetLinks.length) {
-          if (node.partOfCycle && numberOfNonSelfLinkingCycles(node, id) > 0);
-          else if (depth == 0 && n == 1) {
-            nodeHeight = node.y1 - node.y0;
+          // NOTE: This used to have a stray trailing semicolon:
+          //   if (node.partOfCycle && numberOfNonSelfLinkingCycles(node, id) > 0);
+          // which effectively disabled relaxation for cycle nodes and could pin bottom-cycle
+          // nodes far from their neighbors. We still allow relaxation, but damp it for cycle
+          // nodes so cycles stay stable while not drifting to extreme positions.
+          const isCycleNode = node.partOfCycle && numberOfNonSelfLinkingCycles(node, id) > 0;
+          // Cycle nodes get reduced relaxation PLUS center gravity to prevent drift to extremes.
+          const cycleAlpha = isCycleNode ? alpha * 0.5 : alpha;
 
-            node.y0 = graph.y1 / 2 - nodeHeight / 2;
-            node.y1 = graph.y1 / 2 + nodeHeight / 2;
-          } else if (depth == columnsLength - 1 && n == 1) {
-            nodeHeight = node.y1 - node.y0;
-
-            node.y0 = graph.y1 / 2 - nodeHeight / 2;
-            node.y1 = graph.y1 / 2 + nodeHeight / 2;
-          } else if (
+          // NOTE: We do NOT hard-pin single-node columns to the vertical center during relaxation.
+          // Doing so makes sink/source nodes (e.g. last-column nodes like `booking`) act as a strong
+          // vertical anchor and can drag entire flows downward/upward. Initial placement is handled
+          // in computeNodeBreadths(); during relaxation we let them move toward their weighted neighbors.
+          if (
             node.targetLinks.length == 1 &&
             node.targetLinks[0].source.sourceLinks.length == 1
           ) {
@@ -905,8 +989,79 @@ function resolveCollisionsAndRelax() {
           } else {
             var avg = 0;
 
-            var avgTargetY = mean(node.sourceLinks, linkTargetCenter);
-            var avgSourceY = mean(node.targetLinks, linkSourceCenter);
+            // Use weighted averages to better align nodes with the dominant flow,
+            // and for cycle nodes prefer non-circular links so circular routing doesn't
+            // pin nodes to extreme top/bottom.
+            function realNodeByName(name) {
+              if (!name) return null;
+              // graph.nodes contains the live node objects with updated y after layout
+              for (var i = 0; i < graph.nodes.length; i++) {
+                if (graph.nodes[i] && graph.nodes[i].name === name) return graph.nodes[i];
+              }
+              return null;
+            }
+
+            function getRealEndpointNode(link, which) {
+              // which: "source" | "target"
+              var end = link && link[which];
+              if (!end) return end;
+
+              // If endpoint is virtual, use replacedLinks to find the real endpoint.
+              // Note: replacedLinks are clones; we map to live nodes by name.
+              if (end.virtual && end.replacedLink !== undefined && graph.replacedLinks) {
+                var rl = graph.replacedLinks.find(function (x) {
+                  return x && x.index === end.replacedLink;
+                });
+                if (rl && rl[which]) {
+                  var nm =
+                    typeof rl[which] === "string" ? rl[which] : rl[which].name;
+                  var live = realNodeByName(nm);
+                  if (live) return live;
+                }
+              }
+              return end;
+            }
+
+            function linkRealSourceCenter(l) {
+              var src = getRealEndpointNode(l, "source");
+              return src ? nodeCenter(src) : undefined;
+            }
+
+            function linkRealTargetCenter(l) {
+              var tgt = getRealEndpointNode(l, "target");
+              return tgt ? nodeCenter(tgt) : undefined;
+            }
+
+            function weightedMean(links, accessor) {
+              var sw = 0;
+              var sx = 0;
+              for (var i = 0; i < links.length; i++) {
+                var l = links[i];
+                var w = l && typeof l.value === "number" ? l.value : 0;
+                if (!w) continue;
+
+                // Normalize virtual-link weight so long-span links don't dominate relaxation.
+                if (virtualChainLenByParent && l && l.linkType === "virtual" && l.parentLink != null) {
+                  var clen = virtualChainLenByParent.get(l.parentLink) || 1;
+                  if (clen > 1) w = w / clen;
+                }
+
+                if (l && l.circular) {
+                  if (!circularRelaxationWeight) continue;
+                  w = w * circularRelaxationWeight;
+                }
+                var x = accessor(l);
+                if (!Number.isFinite(x)) continue;
+                sw += w;
+                sx += w * x;
+              }
+              return sw ? sx / sw : undefined;
+            }
+
+            // IMPORTANT: for virtual routes, use real endpoints to avoid artificial drift
+            // from intermediate virtual nodes pulling layout up/down.
+            var avgTargetY = weightedMean(node.sourceLinks, linkRealTargetCenter);
+            var avgSourceY = weightedMean(node.targetLinks, linkRealSourceCenter);
 
             if (avgTargetY && avgSourceY) {
               avg = (avgTargetY + avgSourceY) / 2;
@@ -914,7 +1069,7 @@ function resolveCollisionsAndRelax() {
               avg = avgTargetY || avgSourceY;
             }
 
-            var dy = (avg - nodeCenter(node)) * alpha;
+            var dy = (avg - nodeCenter(node)) * cycleAlpha;
             // positive if it node needs to move down
             node.y0 += dy;
             node.y1 += dy;
@@ -999,17 +1154,41 @@ function resolveCollisionsAndRelax() {
         }
       }
 
-      // Column bounds clamp:
-      // After collision resolution, a column may drift outside the vertical bounds
-      // (e.g. pushed up to fit the bottom, then ends up above graph.y0).
-      // Compute a single vertical shift that keeps the entire column within [graph.y0, graph.y1]
-      // whenever possible.
+      // Center REAL (non-virtual) nodes vertically if there's extra space.
+      // Virtual nodes span the entire column for routing, so we only center real nodes.
+      var realNodes = nodes.filter(function(nn) { return !nn.isVirtual && !nn.virtual; });
+      if (realNodes.length > 0 && realNodes.length < nodes.length) {
+        // Column has both real and virtual nodes - center real nodes only
+        var realMinY0 = Infinity;
+        var realMaxY1 = -Infinity;
+        for (var ri = 0; ri < realNodes.length; ++ri) {
+          if (realNodes[ri].y0 < realMinY0) realMinY0 = realNodes[ri].y0;
+          if (realNodes[ri].y1 > realMaxY1) realMaxY1 = realNodes[ri].y1;
+        }
+        var realColumnHeight = realMaxY1 - realMinY0;
+        var availableSpace = graph.y1 - graph.y0;
+        if (realColumnHeight < availableSpace * 0.5) { // Only center if real nodes are small relative to chart
+          var centerShift = (availableSpace - realColumnHeight) / 2 - (realMinY0 - graph.y0);
+          for (var ri = 0; ri < realNodes.length; ++ri) {
+            realNodes[ri].y0 += centerShift;
+            realNodes[ri].y1 += centerShift;
+          }
+        }
+      }
+
+      // Compute overall column bounds for clamping
       var minY0 = Infinity;
       var maxY1 = -Infinity;
       for (i = 0; i < n; ++i) {
         if (nodes[i].y0 < minY0) minY0 = nodes[i].y0;
         if (nodes[i].y1 > maxY1) maxY1 = nodes[i].y1;
       }
+
+      // Column bounds clamp:
+      // After collision resolution (and centering), a column may drift outside the vertical bounds
+      // (e.g. pushed up to fit the bottom, then ends up above graph.y0).
+      // Compute a single vertical shift that keeps the entire column within [graph.y0, graph.y1]
+      // whenever possible.
       // We need shift >= (graph.y0 - minY0) to satisfy the top bound,
       // and shift <= (graph.y1 - maxY1) to satisfy the bottom bound.
       var lowerShift = graph.y0 - minY0;
@@ -1351,6 +1530,9 @@ class SankeyChart {
         virtualPadding: 7,
         horizontalSort: null,
         verticalSort: null,
+        // How much circular links influence vertical relaxation.
+        // 0 = ignore circular links (default), 0.2..0.5 = let circular structure pull nodes slightly.
+        circularRelaxationWeight: 0,
         // Pull cycle nodes slightly away from the extreme top/bottom (in px).
         // Useful when circular routing reserves a lot of space and some cycle nodes end up too far from center.
         cycleInset: 0,
@@ -1471,7 +1653,21 @@ class SankeyChart {
     // Recalculate node positions with updated link types
     this.graph = computeNodeBreadths.call(this);
     this.graph = resolveCollisionsAndRelax.call(this);
-    this.graph = computeLinkBreadths(this.graph);
+    // Re-assign link ports after recomputing node positions using the SAME custom
+    // circular-aware ordering. `computeLinkBreadths()` sorts circular ports in one
+    // bottom-stacked band and can re-introduce backlink braiding/crossings.
+    this.graph = sortSourceLinks(
+      this.graph,
+      this.config.id,
+      this.config.links.typeOrder,
+      this.config.links.typeAccessor
+    );
+    this.graph = sortTargetLinks(
+      this.graph,
+      this.config.id,
+      this.config.links.typeOrder,
+      this.config.links.typeAccessor
+    );
 
     this.graph = straigtenVirtualNodes(this.graph);
 
@@ -1695,7 +1891,21 @@ class SankeyChart {
       });
     })(this);
 
-    this.graph = computeLinkBreadths(this.graph);
+    // After clamping columns back into bounds, re-assign link ports using the SAME custom
+    // circular-aware ordering. `computeLinkBreadths()` sorts circular ports in a single
+    // bottom-stacked band and can re-introduce wrong entry ordering/braiding.
+    this.graph = sortSourceLinks(
+      this.graph,
+      this.config.id,
+      this.config.links.typeOrder,
+      this.config.links.typeAccessor
+    );
+    this.graph = sortTargetLinks(
+      this.graph,
+      this.config.id,
+      this.config.links.typeOrder,
+      this.config.links.typeAccessor
+    );
     this.graph = straigtenVirtualNodes(this.graph);
 
     this.graph = addCircularPathData(
@@ -1838,7 +2048,29 @@ class SankeyChart {
           .style("opacity", 1);
       });
 
-    var link = linkG.data(this.graph.links).enter().append("g");
+    // Render order (z-order):
+    // SVG paints in DOM order (later elements are on top). To avoid ugly visual crossings
+    // and to match the expected "entry order" when links overlap, we draw:
+    // - circular links first (behind),
+    // - then non-circular links,
+    // - within each group: thinner first, thicker last.
+    const linksForDraw = this.graph.links
+      .slice()
+      .sort((a, b) => {
+        const aGroup = a && a.circular ? 0 : 1;
+        const bGroup = b && b.circular ? 0 : 1;
+        if (aGroup !== bGroup) return aGroup - bGroup;
+
+        const aw = a && typeof a.width === "number" ? a.width : 0;
+        const bw = b && typeof b.width === "number" ? b.width : 0;
+        if (aw !== bw) return aw - bw;
+
+        const ai = a && typeof a.index === "number" ? a.index : 0;
+        const bi = b && typeof b.index === "number" ? b.index : 0;
+        return ai - bi;
+      });
+
+    var link = linkG.data(linksForDraw).enter().append("g");
 
     const linkTypes = this.config.links.types;
     const typeAccessor = this.config.links.typeAccessor;

@@ -282,20 +282,26 @@ export function sortSourceLinks(inputGraph, id, typeOrder, typeAccessor) {
           }
 
           // Same loop side: enforce consistent ordering.
-          // - self-links last (so they don't steal the "inner" slot on the node)
+          // - self-links placement depends on band direction:
+          //   - TOP band: for user clarity, self-loops should also sit at the very top (first),
+          //     so they don't weave through other top backlinks near the node.
+          //   - BOTTOM band assigns ports bottom->top, so self-links go FIRST (closest to node bottom)
           // - shortest span first (inner)
           // - thinner first (inner), thicker last (outer)
           var l1Self = selfLinking(link1, id);
           var l2Self = selfLinking(link2, id);
-          if (l1Self !== l2Self) return l1Self ? 1 : -1;
+          if (l1Self !== l2Self) {
+            // Self-links first for BOTH top and bottom bands.
+            return l1Self ? -1 : 1;
+          }
 
           var d1 = Math.abs(link1.target.column - link1.source.column);
           var d2 = Math.abs(link2.target.column - link2.source.column);
           if (d1 !== d2) {
             // SOURCE-side ordering for circular links:
-            // - TOP: shorter span exits higher (more local/inner loops first).
-            // - BOTTOM: farther span occupies higher slots within the bottom section (then later anchored to bottom).
-            if (link1.circularLinkType === 'bottom') return d2 - d1;
+            // Keep span ASCENDING for BOTH top and bottom bands.
+            // This makes local (short-span) loops sit closest to the node consistently and
+            // prevents long-span loops from stealing the first slot in the band.
             return d1 - d2;
           }
 
@@ -311,7 +317,10 @@ export function sortSourceLinks(inputGraph, id, typeOrder, typeAccessor) {
 
           var t1 = (link1.target.y0 + link1.target.y1) / 2;
           var t2 = (link2.target.y0 + link2.target.y1) / 2;
-          if (t1 !== t2) return t1 - t2;
+          // IMPORTANT: bottom-band ports are assigned from bottom -> top (see ySourceBottom loop),
+          // so to keep links from "braiding" near the node we must reverse the vertical ordering
+          // for bottom circular links (lower targets first, higher targets last).
+          if (t1 !== t2) return (link1.circularLinkType === "bottom") ? (t2 - t1) : (t1 - t2);
           return (link1.index || 0) - (link2.index || 0);
         }
       });
@@ -448,33 +457,43 @@ export function sortTargetLinks(inputGraph, id, typeOrder, typeAccessor) {
           // Same loop side: same ordering policy as in sortSourceLinks.
           var l1Self = selfLinking(link1, id);
           var l2Self = selfLinking(link2, id);
-          if (l1Self !== l2Self) return l1Self ? 1 : -1;
-
-          // Primary for TARGET-side readability: order incoming circular links by their sources'
-          // vertical positions. This greatly reduces near-node crossings ("braids").
-          var s1 = (link1.source.y0 + link1.source.y1) / 2;
-          var s2 = (link2.source.y0 + link2.source.y1) / 2;
-          if (s1 !== s2) return s1 - s2;
-
-          var d1 = Math.abs(link1.target.column - link1.source.column);
-          var d2 = Math.abs(link2.target.column - link2.source.column);
-          if (d1 !== d2) {
-            // TARGET-side ordering for circular links should primarily reflect distance
-            // to the source node, but for readability at the target node we want the
-            // farthest backlinks to enter LOWEST (closest to node bottom) so they don't
-            // "sit on top" of all other incoming backlinks.
-            // Therefore:
-            // - TOP: distance ASC (farthest enters lowest)
-            // - BOTTOM: distance DESC (farthest enters highest)
-            if (link1.circularLinkType === 'bottom') return d2 - d1;
-            return d1 - d2;
+          if (l1Self !== l2Self) {
+            // Self-links first for BOTH top and bottom bands.
+            return l1Self ? -1 : 1;
           }
 
-          // (sourceY tie already handled above)
-
+          // Ordering inside a band:
+          // - TOP: span ASC, then sourceY ASC, then width ASC (thin inner → thick outer).
+          // - BOTTOM: span ASC, then (type-dependent) sourceY ordering, then width ASC.
+          //
+          // Rationale for BOTTOM:
+          // bottom ports are assigned from bottom->top, so earlier links end up lower on the node.
+          // We use two different mental models depending on link family:
+          // - `search_loop` and `search_nearby`: preserve source vertical order at the target (sourceY DESC)
+          // - others: inverted mapping used historically in this project (sourceY ASC)
+          var d1 = Math.abs(link1.target.column - link1.source.column);
+          var d2 = Math.abs(link2.target.column - link2.source.column);
+          var s1 = (link1.source.y0 + link1.source.y1) / 2;
+          var s2 = (link2.source.y0 + link2.source.y1) / 2;
           var w1 = link1.width || 0;
           var w2 = link2.width || 0;
-          if (w1 !== w2) return w1 - w2;
+
+          if (link1.circularLinkType === "bottom") {
+            // Bottom band: preserve historical *port assignment* behavior:
+            // shorter span takes the lower ports first (ports are assigned bottom->top).
+            // Then preserve source vertical order (lower sources enter lower) without relying on link types.
+            if (d1 !== d2) return d1 - d2;
+            if (s1 !== s2) {
+              // bottom-band ports are assigned bottom->top; to preserve source order at the target,
+              // lower sources must take the lower ports first => sourceY DESC.
+              return s2 - s1;
+            }
+            if (w1 !== w2) return w1 - w2;
+          } else {
+            if (d1 !== d2) return d1 - d2;
+            if (s1 !== s2) return s1 - s2;
+            if (w1 !== w2) return w1 - w2;
+          }
 
           return (link1.index || 0) - (link2.index || 0);
         }
