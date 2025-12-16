@@ -251,6 +251,13 @@ export function addCircularPathData(
         // Modest cap (~15% of diagram height) to avoid huge gaps while still allowing escape.
         var maxAllowedBaseOffset = Math.max(verticalMargin, (graph.y1 - graph.y0) * 0.15);
         var baseOffset = Math.min(desiredBaseOffset, maxAllowedBaseOffset);
+        // Record if we hit the cap: used later to tighten corner radii ONLY when the
+        // link is constrained by the boundary (prevents shrinking every link).
+        if (link.circularPathData) {
+          link.circularPathData._desiredBaseOffset = desiredBaseOffset;
+          link.circularPathData._maxAllowedBaseOffset = maxAllowedBaseOffset;
+          link.circularPathData._baseOffsetCapped = desiredBaseOffset > maxAllowedBaseOffset + 1e-6;
+        }
         // IMPORTANT: do NOT force all links in a bundle to share the same verticalBuffer.
         // That makes them collapse onto one horizontal line (same verticalFullExtent).
         // Group alignment should be handled via groupMinY/groupMaxY (baseOffset sizing),
@@ -366,67 +373,38 @@ export function addCircularPathData(
     });
   });
 
-  // Boundary-aware corner tightening:
-  // When a circular arc approaches the top/bottom chart boundary, a large corner radius
-  // looks visually "bloated" (huge rounding in the right/left upper corner).
-  // Reduce the corner radii in proportion to how close the arc is to the boundary.
-  //
-  // This does NOT change how high/low the arc escapes (verticalFullExtent), only how round
-  // the corners are near the boundary (verticalRightInnerExtent / verticalLeftInnerExtent).
-  var topSoftZone = baseRadius * 1.5;
-  var bottomSoftZone = baseRadius * 1.5;
-
-  function clampCornerRadius(current, minR, over) {
-    if (!(typeof current === "number")) return current;
-    if (!(over > 0)) return current;
-    return Math.max(minR, current - over);
-  }
-
+  // Corner tightening ONLY when the link is boundary-constrained (baseOffset capped).
+  // This targets the visually bloated RIGHT corner (top-right for TOP links, bottom-right for BOTTOM links)
+  // without collapsing the spacing for all circular links.
   graph.links.forEach(function(l) {
     if (!l.circular) return;
     if (selfLinking(l, id)) return;
     if (!l.circularPathData) return;
     var c = l.circularPathData;
-    var minR = baseRadius + (l.width || 0) / 2;
+    if (!c._baseOffsetCapped) return;
 
-    if (l.circularLinkType === "top") {
-      var overTop = (graph.y0 + topSoftZone) - c.verticalFullExtent;
-      if (overTop > 0) {
-        // Tighten both right and left corner radii (right-upper and left-upper corners).
-        c.rightLargeArcRadius = clampCornerRadius(c.rightLargeArcRadius, minR, overTop);
-        c.leftLargeArcRadius = clampCornerRadius(c.leftLargeArcRadius, minR, overTop);
-        // Keep the small radii <= large radii.
-        if (typeof c.rightSmallArcRadius === "number") {
-          c.rightSmallArcRadius = Math.min(
-            c.rightLargeArcRadius,
-            clampCornerRadius(c.rightSmallArcRadius, minR, overTop)
-          );
-        }
-        if (typeof c.leftSmallArcRadius === "number") {
-          c.leftSmallArcRadius = Math.min(
-            c.leftLargeArcRadius,
-            clampCornerRadius(c.leftSmallArcRadius, minR, overTop)
-          );
-        }
-      }
-    } else {
-      var overBottom = c.verticalFullExtent - (graph.y1 - bottomSoftZone);
-      if (overBottom > 0) {
-        c.rightLargeArcRadius = clampCornerRadius(c.rightLargeArcRadius, minR, overBottom);
-        c.leftLargeArcRadius = clampCornerRadius(c.leftLargeArcRadius, minR, overBottom);
-        if (typeof c.rightSmallArcRadius === "number") {
-          c.rightSmallArcRadius = Math.min(
-            c.rightLargeArcRadius,
-            clampCornerRadius(c.rightSmallArcRadius, minR, overBottom)
-          );
-        }
-        if (typeof c.leftSmallArcRadius === "number") {
-          c.leftSmallArcRadius = Math.min(
-            c.leftLargeArcRadius,
-            clampCornerRadius(c.leftSmallArcRadius, minR, overBottom)
-          );
-        }
-      }
+    var desired = c._desiredBaseOffset || 0;
+    var maxAllowed = c._maxAllowedBaseOffset || 0;
+    if (!(desired > 1e-6) || !(maxAllowed > 1e-6)) return;
+
+    // Ratio < 1 means we hit the cap. Smaller ratio => more constrained => tighter corner.
+    var ratio = maxAllowed / desired;
+    // Don't over-tighten; keep some curvature to avoid square-ish artifacts.
+    ratio = Math.max(0.6, Math.min(1, ratio));
+
+    var minR = baseRadius + (l.width || 0) / 2;
+    if (typeof c.rightLargeArcRadius === "number") {
+      c.rightLargeArcRadius = minR + (c.rightLargeArcRadius - minR) * ratio;
+    }
+    if (typeof c.rightSmallArcRadius === "number") {
+      c.rightSmallArcRadius = minR + (c.rightSmallArcRadius - minR) * ratio;
+    }
+    if (
+      typeof c.rightLargeArcRadius === "number" &&
+      typeof c.rightSmallArcRadius === "number" &&
+      c.rightSmallArcRadius > c.rightLargeArcRadius
+    ) {
+      c.rightSmallArcRadius = c.rightLargeArcRadius;
     }
   });
 
