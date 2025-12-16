@@ -366,6 +366,93 @@ export function addCircularPathData(
     });
   });
 
+  // Boundary-aware corner tightening:
+  // When a circular arc approaches the top/bottom chart boundary, a large corner radius
+  // looks visually "bloated" (huge rounding in the right/left upper corner).
+  // Reduce the corner radii in proportion to how close the arc is to the boundary.
+  //
+  // This does NOT change how high/low the arc escapes (verticalFullExtent), only how round
+  // the corners are near the boundary (verticalRightInnerExtent / verticalLeftInnerExtent).
+  var topSoftZone = baseRadius * 1.5;
+  var bottomSoftZone = baseRadius * 1.5;
+
+  function clampCornerRadius(current, minR, over) {
+    if (!(typeof current === "number")) return current;
+    if (!(over > 0)) return current;
+    return Math.max(minR, current - over);
+  }
+
+  graph.links.forEach(function(l) {
+    if (!l.circular) return;
+    if (selfLinking(l, id)) return;
+    if (!l.circularPathData) return;
+    var c = l.circularPathData;
+    var minR = baseRadius + (l.width || 0) / 2;
+
+    if (l.circularLinkType === "top") {
+      var overTop = (graph.y0 + topSoftZone) - c.verticalFullExtent;
+      if (overTop > 0) {
+        // Tighten both right and left corner radii (right-upper and left-upper corners).
+        c.rightLargeArcRadius = clampCornerRadius(c.rightLargeArcRadius, minR, overTop);
+        c.leftLargeArcRadius = clampCornerRadius(c.leftLargeArcRadius, minR, overTop);
+        // Keep the small radii <= large radii.
+        if (typeof c.rightSmallArcRadius === "number") {
+          c.rightSmallArcRadius = Math.min(
+            c.rightLargeArcRadius,
+            clampCornerRadius(c.rightSmallArcRadius, minR, overTop)
+          );
+        }
+        if (typeof c.leftSmallArcRadius === "number") {
+          c.leftSmallArcRadius = Math.min(
+            c.leftLargeArcRadius,
+            clampCornerRadius(c.leftSmallArcRadius, minR, overTop)
+          );
+        }
+      }
+    } else {
+      var overBottom = c.verticalFullExtent - (graph.y1 - bottomSoftZone);
+      if (overBottom > 0) {
+        c.rightLargeArcRadius = clampCornerRadius(c.rightLargeArcRadius, minR, overBottom);
+        c.leftLargeArcRadius = clampCornerRadius(c.leftLargeArcRadius, minR, overBottom);
+        if (typeof c.rightSmallArcRadius === "number") {
+          c.rightSmallArcRadius = Math.min(
+            c.rightLargeArcRadius,
+            clampCornerRadius(c.rightSmallArcRadius, minR, overBottom)
+          );
+        }
+        if (typeof c.leftSmallArcRadius === "number") {
+          c.leftSmallArcRadius = Math.min(
+            c.leftLargeArcRadius,
+            clampCornerRadius(c.leftSmallArcRadius, minR, overBottom)
+          );
+        }
+      }
+    }
+  });
+
+  // After any radii post-processing, recompute dependent extents and path strings.
+  graph.links.forEach(function(link) {
+    if (!link.circular || !link.circularPathData) return;
+    var c = link.circularPathData;
+
+    // Update vertical inner extents (depend on large radii).
+    if (link.circularLinkType === "bottom") {
+      c.verticalRightInnerExtent = c.verticalFullExtent - c.rightLargeArcRadius;
+      c.verticalLeftInnerExtent = c.verticalFullExtent - c.leftLargeArcRadius;
+    } else {
+      c.verticalRightInnerExtent = c.verticalFullExtent + c.rightLargeArcRadius;
+      c.verticalLeftInnerExtent = c.verticalFullExtent + c.leftLargeArcRadius;
+    }
+
+    // Update horizontal extents (depend on large radii).
+    c.rightInnerExtent = c.sourceX + c.rightNodeBuffer;
+    c.leftInnerExtent = c.targetX - c.leftNodeBuffer;
+    c.rightFullExtent = c.sourceX + c.rightLargeArcRadius + c.rightNodeBuffer;
+    c.leftFullExtent = c.targetX - c.leftLargeArcRadius - c.leftNodeBuffer;
+
+    link.path = createCircularPathString(link);
+  });
+
   return graph;
 }
 
