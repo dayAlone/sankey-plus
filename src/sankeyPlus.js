@@ -229,6 +229,31 @@ function selectCircularLinkTypes(inputGraph, id) {
     }
   });
 
+  // Local-backlink heuristic:
+  // For very local backward links (span=1), routing them BELOW usually reduces crossings
+  // because they sit under the dense TOP bundles. This matches the UX expectation for
+  // "between two adjacent columns" backlinks.
+  graph.links.forEach(function (link) {
+    if (!link.circular || selfLinking(link, id)) return;
+    if (link._forcedCircularLinkType) return;
+    if (!link.source || !link.target) return;
+
+    var span = Math.abs((link.source.column || 0) - (link.target.column || 0));
+    var isBackward = (link.target.column || 0) < (link.source.column || 0);
+    if (!(isBackward && span === 1)) return;
+
+    var sourceCenter = (link.source.y0 + link.source.y1) / 2;
+    var targetCenter = (link.target.y0 + link.target.y1) / 2;
+    var srcH = (link.source.y1 - link.source.y0) || 0;
+    var tgtH = (link.target.y1 - link.target.y0) || 0;
+    var localThreshold = Math.max(srcH, tgtH); // "nearby" in the same band of the diagram
+
+    if (Math.abs(targetCenter - sourceCenter) <= localThreshold) {
+      link.circularLinkType = "bottom";
+      link._forcedCircularLinkType = "bottom";
+    }
+  });
+
   // Consistency pass: prevent X-crossings for links leaving the same column
   // If a link from a lower node goes Top, and a link from an upper node goes Bottom, they cross.
   // We should swap them or force them to be consistent.
