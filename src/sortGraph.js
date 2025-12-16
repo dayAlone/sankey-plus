@@ -453,6 +453,12 @@ export function sortTargetLinks(inputGraph, id, typeOrder, typeAccessor) {
           var l2Self = selfLinking(link2, id);
           if (l1Self !== l2Self) return l1Self ? 1 : -1;
 
+          // Primary for TARGET-side readability: order incoming circular links by their sources'
+          // vertical positions. This greatly reduces near-node crossings ("braids").
+          var s1 = (link1.source.y0 + link1.source.y1) / 2;
+          var s2 = (link2.source.y0 + link2.source.y1) / 2;
+          if (s1 !== s2) return s1 - s2;
+
           var d1 = Math.abs(link1.target.column - link1.source.column);
           var d2 = Math.abs(link2.target.column - link2.source.column);
           if (d1 !== d2) {
@@ -467,12 +473,7 @@ export function sortTargetLinks(inputGraph, id, typeOrder, typeAccessor) {
             return d1 - d2;
           }
 
-          // If sources are in the same column, keep their vertical order for readability.
-          if (link1.source.column === link2.source.column) {
-            var s1 = (link1.source.y0 + link1.source.y1) / 2;
-            var s2 = (link2.source.y0 + link2.source.y1) / 2;
-            if (s1 !== s2) return s1 - s2;
-          }
+          // (sourceY tie already handled above)
 
           var w1 = link1.width || 0;
           var w2 = link2.width || 0;
