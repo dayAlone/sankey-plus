@@ -1607,6 +1607,54 @@ class SankeyChart {
       this.config.nodes.width
     );
 
+    // Final safety clamp:
+    // Multiple passes above (relax + extents adjustments) can result in some columns drifting
+    // above graph.y0 (or below graph.y1). Clamp each column back into bounds, then recompute
+    // link breadths so ports/links stay attached correctly.
+    (function clampColumnsToBounds(chart) {
+      var graph = chart.graph;
+      if (!graph || !graph.nodes || !graph.nodes.length) return;
+
+      // group nodes by column
+      var cols = {};
+      graph.nodes.forEach(function (n) {
+        var c = n.column;
+        if (c == null) return;
+        if (!cols[c]) cols[c] = [];
+        cols[c].push(n);
+      });
+
+      Object.keys(cols).forEach(function (c) {
+        var nodes = cols[c];
+        if (!nodes || !nodes.length) return;
+        var minY0 = Infinity;
+        var maxY1 = -Infinity;
+        nodes.forEach(function (n) {
+          if (n.y0 < minY0) minY0 = n.y0;
+          if (n.y1 > maxY1) maxY1 = n.y1;
+        });
+
+        var lowerShift = graph.y0 - minY0;
+        var upperShift = graph.y1 - maxY1;
+        var shift = 0;
+        if (lowerShift <= upperShift) {
+          shift = Math.max(lowerShift, Math.min(0, upperShift));
+        } else {
+          // Taller than available: best effort.
+          shift = (lowerShift + upperShift) / 2;
+        }
+        if (shift !== 0) {
+          nodes.forEach(function (n) {
+            n.y0 += shift;
+            n.y1 += shift;
+          });
+        }
+      });
+    })(this);
+
+    this.graph = computeLinkBreadths(this.graph);
+    this.graph = straigtenVirtualNodes(this.graph);
+
     this.graph = addCircularPathData(
       this.graph,
       this.config.id,
