@@ -28,7 +28,7 @@ const nodes = [
   { name: "sosisa ◐", horizontalSort: 10, verticalSort: 1 },
   { name: "listing ●", horizontalSort: 10, verticalSort: -2 },
   { name: "sosisa ●", horizontalSort: 11, verticalSort: 3 },
-  { name: "booking", horizontalSort: 12, verticalSort: 0 },
+  { name: "done", horizontalSort: 12, verticalSort: 0 },
 ];
 
 function makeChart() {
@@ -67,7 +67,7 @@ function makeChart() {
       color: "lightgrey",
       sortIterations: 12,
       postSortIterations: 4,
-      typeOrder: ["booking", "search_loop", "primary", "secondary"],
+      typeOrder: ["search_loop", "primary", "secondary", "search_nearby"],
       typeAccessor: (d) => d.type,
       types: {},
     },

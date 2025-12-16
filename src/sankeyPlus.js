@@ -976,7 +976,7 @@ function resolveCollisionsAndRelax() {
           const cycleAlpha = isCycleNode ? alpha * 0.5 : alpha;
 
           // NOTE: We do NOT hard-pin single-node columns to the vertical center during relaxation.
-          // Doing so makes sink/source nodes (e.g. last-column nodes like `booking`) act as a strong
+          // Doing so makes sink/source nodes (e.g. last-column nodes) act as a strong
           // vertical anchor and can drag entire flows downward/upward. Initial placement is handled
           // in computeNodeBreadths(); during relaxation we let them move toward their weighted neighbors.
           if (
