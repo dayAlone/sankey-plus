@@ -1527,7 +1527,21 @@ class SankeyChart {
     // );
     this.graph = computeNodeBreadths.call(this);
     this.graph = resolveCollisionsAndRelax.call(this);
-    this.graph = computeLinkBreadths(this.graph);
+    // After shifting nodes we must re-assign link ports using the SAME sorting logic
+    // (especially for circular links). Calling computeLinkBreadths() here would re-sort
+    // with the generic comparators and can re-introduce braiding/crossings.
+    this.graph = sortSourceLinks(
+      this.graph,
+      this.config.id,
+      this.config.links.typeOrder,
+      this.config.links.typeAccessor
+    );
+    this.graph = sortTargetLinks(
+      this.graph,
+      this.config.id,
+      this.config.links.typeOrder,
+      this.config.links.typeAccessor
+    );
     this.graph = straigtenVirtualNodes(this.graph);
 
     this.graph = addCircularPathData(
