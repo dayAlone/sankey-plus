@@ -1487,15 +1487,13 @@ class SankeyChart {
         this.graph,
         this.config.id,
         this.config.links.typeOrder,
-        this.config.links.typeAccessor,
-        circularPortGap
+        this.config.links.typeAccessor
       );
       this.graph = sortTargetLinks(
         this.graph,
         this.config.id,
         this.config.links.typeOrder,
-        this.config.links.typeAccessor,
-        circularPortGap
+        this.config.links.typeAccessor
       );
     }
 
