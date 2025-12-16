@@ -1624,10 +1624,12 @@ class SankeyChart {
         cols[c].push(n);
       });
 
-      // Compute a common "top-cycle baseline" so columns with top cycle nodes don't drift
-      // upward relative to other top-cycle columns (this is what makes e.g. `sosisa ○` sit above
-      // `search ○/◐/...` even though they are all top-cycle nodes).
-      var baselineTopCycleY = -Infinity;
+      // Compute a stable "top-cycle baseline" derived from the earliest (left-most) column
+      // that contains a real top-cycle node. Later columns are allowed to move DOWN to match
+      // this baseline (prevents later columns drifting upward above the early columns).
+      var baselineTopCycleY = graph.y0;
+      var baselineCol = Infinity;
+      var minTopByCol = {};
       Object.keys(cols).forEach(function (c) {
         var nodes = cols[c];
         if (!nodes || !nodes.length) return;
@@ -1640,9 +1642,15 @@ class SankeyChart {
             }
           }
         });
-        if (minTopCycle < Infinity) baselineTopCycleY = Math.max(baselineTopCycleY, minTopCycle);
+        if (minTopCycle < Infinity) {
+          minTopByCol[c] = minTopCycle;
+          var colNum = +c;
+          if (isFinite(colNum) && colNum < baselineCol) baselineCol = colNum;
+        }
       });
-      if (!isFinite(baselineTopCycleY)) baselineTopCycleY = graph.y0;
+      if (baselineCol < Infinity) {
+        baselineTopCycleY = minTopByCol[String(baselineCol)];
+      }
 
       Object.keys(cols).forEach(function (c) {
         var nodes = cols[c];
