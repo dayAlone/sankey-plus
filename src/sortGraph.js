@@ -154,7 +154,7 @@ export function ascendingBreadth(a, b) {
 
 
   // sort and set the links' y0 for each node
-export function sortSourceLinks(inputGraph, id, typeOrder, typeAccessor, circularPortGap) {
+export function sortSourceLinks(inputGraph, id, typeOrder, typeAccessor) {
 
   let graph = inputGraph;
 
@@ -323,18 +323,6 @@ export function sortSourceLinks(inputGraph, id, typeOrder, typeAccessor, circula
     nodesSourceLinks.forEach(function(link, idx) {
       link.y0 = ySourceOffset + link.width / 2;
       ySourceOffset = ySourceOffset + link.width;
-      // Add a small separation between adjacent circular links on the same loop side.
-      // (Prevents thin links from "touching" and visually overlapping.)
-      var next = nodesSourceLinks[idx + 1];
-      if (
-        circularPortGap &&
-        link.circular &&
-        next &&
-        next.circular &&
-        link.circularLinkType === next.circularLinkType
-      ) {
-        ySourceOffset = ySourceOffset + circularPortGap;
-      }
     });
 
     // correct any circular bottom links so they are at the bottom of the node
@@ -350,9 +338,6 @@ export function sortSourceLinks(inputGraph, id, typeOrder, typeAccessor, circula
             bottomCountBelow++;
           }
         }
-        if (circularPortGap && bottomCountBelow > 0) {
-          offsetFromBottom = offsetFromBottom + bottomCountBelow * circularPortGap;
-        }
         link.y0 = node.y1 - offsetFromBottom - link.width / 2;
       }
     });
@@ -363,7 +348,7 @@ export function sortSourceLinks(inputGraph, id, typeOrder, typeAccessor, circula
 
 
 // sort and set the links' y1 for each node
-export function sortTargetLinks(inputGraph, id, typeOrder, typeAccessor, circularPortGap) {
+export function sortTargetLinks(inputGraph, id, typeOrder, typeAccessor) {
   let graph = inputGraph;
 
   graph.nodes.forEach(function(node) {
@@ -505,15 +490,6 @@ export function sortTargetLinks(inputGraph, id, typeOrder, typeAccessor, circula
       link.y1 = yTargetOffset + link.width / 2;
       yTargetOffset = yTargetOffset + link.width;
       var next = nodesTargetLinks[idx + 1];
-      if (
-        circularPortGap &&
-        link.circular &&
-        next &&
-        next.circular &&
-        link.circularLinkType === next.circularLinkType
-      ) {
-        yTargetOffset = yTargetOffset + circularPortGap;
-      }
     });
 
     // correct any circular bottom links so they are at the bottom of the node
@@ -528,9 +504,6 @@ export function sortTargetLinks(inputGraph, id, typeOrder, typeAccessor, circula
           if (nodesTargetLinks[j].circular && nodesTargetLinks[j].circularLinkType == 'bottom') {
             bottomCountBelow++;
           }
-        }
-        if (circularPortGap && bottomCountBelow > 0) {
-          offsetFromBottom = offsetFromBottom + bottomCountBelow * circularPortGap;
         }
         link.y1 = node.y1 - offsetFromBottom - link.width / 2;
       }

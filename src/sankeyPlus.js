@@ -668,7 +668,7 @@ function computeNodeBreadths() {
   const id = this.config.id;
 
   function nodeHeightPx(node) {
-    return (node.value * graph.ky) + (node._circularPortGapPx || 0);
+    return node.value * graph.ky;
   }
 
   let columns = groups(graph.nodes, (d) => d.column)
@@ -909,7 +909,7 @@ function resolveCollisionsAndRelax() {
     const baseRadius = this.config.links.circularRadius || 10;
     const graph = this.graph;
     function nodeHeightPx(node) {
-      return (node.value * graph.ky) + (node._circularPortGapPx || 0);
+      return node.value * graph.ky;
     }
     
     columns.forEach((nodes) => {
@@ -931,9 +931,8 @@ function resolveCollisionsAndRelax() {
         nodes[i].selfLinksHeight = getSelfLinksHeight(nodes[i], id, baseRadius);
       }
 
-      // Second pass: position nodes with space for self-links
-      // Calculate total height needed for nodes and self-links
-      // Include circular port gaps in node heights.
+    // Second pass: position nodes with space for self-links
+    // Calculate total height needed for nodes and self-links
       let totalNodesHeight = nodes.reduce((sum, n) => sum + (n.virtual ? 0 : nodeHeightPx(n)), 0);
       let totalSelfLinksHeight = nodes.reduce((sum, n) => sum + (n.selfLinksHeight ? n.selfLinksHeight.top + n.selfLinksHeight.bottom : 0), 0);
       let availableHeight = graph.y1 - graph.y0;
@@ -1403,8 +1402,7 @@ class SankeyChart {
       this.config.links.circularLinkPortionTopBottom,
       this.config.links.circularLinkPortionLeftRight,
       this.config.scale,
-      this.config.links.baseRadius,
-      Math.max(1, Math.round((this.config.links.circularGap || 5) * 0.2))
+      this.config.links.baseRadius
     );
 
     
@@ -1421,11 +1419,7 @@ class SankeyChart {
     // Recalculate node positions with updated link types
     this.graph = computeNodeBreadths.call(this);
     this.graph = resolveCollisionsAndRelax.call(this);
-    // Add a tiny extra separation between circular links at node ports.
-    // Without this, adjacent circular links can "touch" and visually overlap due to
-    // stroke rendering/anti-aliasing (especially for thin links).
-    var circularPortGap = Math.max(1, Math.round((this.config.links.circularGap || 5) * 0.2));
-    this.graph = computeLinkBreadths(this.graph, circularPortGap);
+    this.graph = computeLinkBreadths(this.graph);
 
     this.graph = straigtenVirtualNodes(this.graph);
 
@@ -1452,7 +1446,7 @@ class SankeyChart {
     // );
     this.graph = computeNodeBreadths.call(this);
     this.graph = resolveCollisionsAndRelax.call(this);
-    this.graph = computeLinkBreadths(this.graph, circularPortGap);
+    this.graph = computeLinkBreadths(this.graph);
     this.graph = straigtenVirtualNodes(this.graph);
 
     this.graph = addCircularPathData(
@@ -1472,15 +1466,13 @@ class SankeyChart {
         this.graph,
         this.config.id,
         this.config.links.typeOrder,
-        this.config.links.typeAccessor,
-        circularPortGap
+        this.config.links.typeAccessor
       );
       this.graph = sortTargetLinks(
         this.graph,
         this.config.id,
         this.config.links.typeOrder,
-        this.config.links.typeAccessor,
-        circularPortGap
+        this.config.links.typeAccessor
       );
     }
 
