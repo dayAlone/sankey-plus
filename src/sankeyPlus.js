@@ -27,6 +27,100 @@ import { adjustGraphExtents } from "./adjustGraphExtents.js";
 
 //internal functions
 
+// Link label helpers (pure; used for hover-mode label text decisions)
+function _sameNodeForLabels(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  // Fallback: compare by stable fields when links/nodes are cloned.
+  if (a.index !== undefined && b.index !== undefined && a.index === b.index) return true;
+  if (a.name !== undefined && b.name !== undefined && a.name === b.name) return true;
+  return false;
+}
+
+function _isSelfLinkForLabels(d) {
+  return (d && d.source && d.target) && ((d.source === d.target) || (d.source.name === d.target.name));
+}
+
+function _isBacklinkForLabels(d) {
+  return !_isSelfLinkForLabels(d) && (d && d.source && d.target) && ((d.source.column || 0) > (d.target.column || 0));
+}
+
+// Exported for tests/debugging (does not affect rendering unless used by draw()).
+export function _linkLabelText(d, position, mode, hoveredNode) {
+  // position: "source" | "target" | "self"
+  // mode: "link" | "node"
+  const isSelf = _isSelfLinkForLabels(d);
+  if (position === "self") return isSelf ? (d.value + "%") : "";
+  if (isSelf) return "";
+
+  if (mode === "node") {
+    // Node hover: show value at the *other* end of the link:
+    // - if hovered node is target => show at source end (neighbor)
+    // - if hovered node is source => show at target end (neighbor)
+    if (!hoveredNode) return "";
+    const hoveredIsTarget = _sameNodeForLabels(hoveredNode, d.target);
+    const hoveredIsSource = _sameNodeForLabels(hoveredNode, d.source);
+    if (hoveredIsTarget) return position === "source" ? (d.value + "%") : "";
+    if (hoveredIsSource) return position === "target" ? (d.value + "%") : "";
+    return "";
+  }
+
+  // Link hover (default): backlinks at source, forward at target.
+  const isBack = _isBacklinkForLabels(d);
+  if (position === "source") return isBack ? (d.value + "%") : "";
+  if (position === "target") return isBack ? "" : (d.value + "%");
+  return "";
+}
+
+// Exported for tests/debugging: resolve label anchor X for source/target labels.
+// Handles "replaced" links that may not have live node coordinates on d.source/d.target,
+// but do have stitched coordinates on d.x0/d.x1.
+export function _linkLabelAnchorX(d, whichEnd) {
+  // whichEnd: "source" | "target"
+  if (!d) return 0;
+  if (d.circular && d.circularPathData) {
+    return whichEnd === "source"
+      ? (d.circularPathData.sourceX + 2)
+      : (d.circularPathData.targetX - 2);
+  }
+
+  if (whichEnd === "source") {
+    const sx =
+      (d.source && Number.isFinite(d.source.x1) ? d.source.x1 : NaN);
+    if (Number.isFinite(sx)) return sx + 2;
+    if (Number.isFinite(d.x0)) return d.x0 + 2;
+    return 0;
+  }
+
+  const tx =
+    (d.target && Number.isFinite(d.target.x0) ? d.target.x0 : NaN);
+  if (Number.isFinite(tx)) return tx - 2;
+  if (Number.isFinite(d.x1)) return d.x1 - 2;
+  return 0;
+}
+
+// Exported for tests/debugging: resolve label anchor Y for source/target labels.
+// placement: "below" (default) | "above"
+export function _linkLabelAnchorY(d, whichEnd, placement = "below") {
+  if (!d) return 0;
+  const halfW = Math.max(1, d.width || 0) / 2;
+
+  let endY = 0;
+  if (d.circular && d.circularPathData) {
+    endY = whichEnd === "source" ? d.circularPathData.sourceY : d.circularPathData.targetY;
+  } else if (whichEnd === "source") {
+    endY = Number.isFinite(d.y0) ? d.y0 : 0;
+  } else {
+    if (Number.isFinite(d.y1)) endY = d.y1;
+    else if (d.target && Number.isFinite(d.target.y0) && Number.isFinite(d.target.y1)) endY = d.target.y0 + (d.target.y1 - d.target.y0) / 2;
+    else endY = 0;
+  }
+
+  // Keep the existing visual style: "below" puts text under the stroke, "above" puts it above.
+  if (placement === "above") return endY - halfW - 4;
+  return endY + halfW + 12;
+}
+
 const _typeof =
   typeof Symbol === "function" && typeof Symbol.iterator === "symbol"
     ? function (obj) {
@@ -156,6 +250,19 @@ function identifyCircles(inputGraph, sortNodes) {
 function selectCircularLinkTypes(inputGraph, id) {
   let graph = inputGraph;
 
+  // Optional debug: keep a per-link trace of circularLinkType changes across passes.
+  function trace(link, stage) {
+    if (!link || !link._debugCircular) return;
+    if (!link._debugTypeTrace) link._debugTypeTrace = [];
+    link._debugTypeTrace.push({
+      stage: stage,
+      circularLinkType: link.circularLinkType,
+      forced: link._forcedCircularLinkType,
+      src: link.source && link.source.name,
+      tgt: link.target && link.target.name,
+    });
+  }
+
   // Reset any per-run forced routing hints
   graph.links.forEach(function (l) {
     if (l && l._forcedCircularLinkType) delete l._forcedCircularLinkType;
@@ -175,6 +282,7 @@ function selectCircularLinkTypes(inputGraph, id) {
         link.circularLinkType =
           numberOfTops < numberOfBottoms ? "top" : "bottom";
       }
+      trace(link, "init/balanced-or-node-hint");
 
       if (link.circularLinkType == "top") {
         numberOfTops = numberOfTops + 1;
@@ -209,6 +317,7 @@ function selectCircularLinkTypes(inputGraph, id) {
         } else {
           link.circularLinkType = "bottom";
         }
+        trace(link, "pass1/forward-by-vertical");
       } else {
         // Backward circular links: route towards target
         // Prefer geometric consistency but allow balancing if not extreme
@@ -223,6 +332,7 @@ function selectCircularLinkTypes(inputGraph, id) {
            } else {
              link.circularLinkType = "bottom";
            }
+           trace(link, "pass1/backward-extreme-vertical");
         }
         // Otherwise keep the balanced assignment (from lines 170-172)
       }
@@ -249,15 +359,19 @@ function selectCircularLinkTypes(inputGraph, id) {
     var tgtH = (link.target.y1 - link.target.y0) || 0;
     var localThreshold = Math.max(srcH, tgtH); // "nearby" in the same band of the diagram
 
-    // If target is above source, prefer TOP routing (shorter path going up)
-    var targetAbove = targetCenter < sourceCenter;
-    if (targetAbove) {
+    // Default for span=1 backward links: BOTTOM (keeps them out of dense TOP bundles).
+    // Only force TOP when target is *clearly* above source; otherwise you can end up
+    // with visually-bottom links still participating in TOP buffering.
+    var verticalDiff = sourceCenter - targetCenter; // positive when target is above
+    var targetSignificantlyAbove = verticalDiff > localThreshold * 0.75;
+    if (targetSignificantlyAbove) {
       link.circularLinkType = "top";
       link._forcedCircularLinkType = "top";
-    } else if (Math.abs(targetCenter - sourceCenter) <= localThreshold) {
-      // Target is below or at same level, and nearby - route BOTTOM
+      trace(link, "pass2/local-backlink/force-top");
+    } else {
       link.circularLinkType = "bottom";
       link._forcedCircularLinkType = "bottom";
+      trace(link, "pass2/local-backlink/force-bottom");
     }
   });
 
@@ -344,6 +458,9 @@ function selectCircularLinkTypes(inputGraph, id) {
       
       if (tgtY < srcY) {
          badBottomLink.circularLinkType = "top";
+         // IMPORTANT: mark as forced so later consistency passes don't silently revert it.
+         badBottomLink._forcedCircularLinkType = "top";
+         trace(badBottomLink, "pass3/resolve-crossing/force-top");
       }
     }
   });
@@ -1456,9 +1573,16 @@ function addVirtualPathData(inputGraph, virtualLinkType) {
           if (firstPath) {
             pathString = pathString + graph.links[i].path;
             firstPath = false;
+            // Capture source coords from first segment
+            replacedLink.y0 = graph.links[i].y0;
+            replacedLink.source.x1 = graph.links[i].source.x1; // Ensure source attachment is correct? 
+            // Actually y0/y1 on the link itself is what matters for labels
           } else {
             pathString = pathString + graph.links[i].path.replace("M", "L");
           }
+          // Capture target coords from last segment
+          // Since we iterate all, the last matching one will overwrite this, which is what we want
+          replacedLink.y1 = graph.links[i].y1;
         }
       }
 
@@ -1943,6 +2067,143 @@ class SankeyChart {
       .attr("stroke-opacity", this.config.links.opacity)
       .selectAll("path");
 
+    // Render order (z-order):
+    // SVG paints in DOM order (later elements are on top). To avoid ugly visual crossings
+    // and to match the expected "entry order" when links overlap, we draw:
+    // - circular links first (behind),
+    // - then non-circular links,
+    // - within each group: thinner first, thicker last.
+    const linksForDraw = this.graph.links
+      .slice()
+      .sort((a, b) => {
+        const aGroup = a && a.circular ? 0 : 1;
+        const bGroup = b && b.circular ? 0 : 1;
+        if (aGroup !== bGroup) return aGroup - bGroup;
+
+        const aw = a && typeof a.width === "number" ? a.width : 0;
+        const bw = b && typeof b.width === "number" ? b.width : 0;
+        if (aw !== bw) return aw - bw;
+
+        const ai = a && typeof a.index === "number" ? a.index : 0;
+        const bi = b && typeof b.index === "number" ? b.index : 0;
+        return ai - bi;
+      });
+
+    const linkLabelsG = g.append("g")
+      .attr("class", "link-labels")
+      .style("pointer-events", "none");
+
+    const linkLabels = linkLabelsG.selectAll(".link-label-group")
+      .data(linksForDraw)
+      .enter()
+      .append("g")
+      .attr("class", "link-label-group")
+      .style("opacity", 0)
+      .style("transition", "opacity 0.3s ease");
+
+    // Source label (For Backlinks)
+    linkLabels.append("text")
+      .attr("class", "link-label-source")
+      .attr("x", d => _linkLabelAnchorX(d, "source"))
+      .attr("y", d => _linkLabelAnchorY(d, "source", "below"))
+      .style("font-size", "10px")
+      .style("fill", "black")
+      .style("font-family", "sans-serif")
+      .text(d => _linkLabelText(d, "source", "link"));
+
+    // Target label (For Normal Links)
+    linkLabels.append("text")
+      .attr("class", "link-label-target")
+      .attr("x", d => {
+        return _linkLabelAnchorX(d, "target");
+      })
+      .attr("y", d => _linkLabelAnchorY(d, "target", "below"))
+      .attr("text-anchor", "end")
+      .text(d => _linkLabelText(d, "target", "link"))
+      .style("font-size", "10px")
+      .style("fill", "black")
+      .style("font-family", "sans-serif");
+
+    // Self-Link Label (Inside Arc)
+    linkLabels.append("text")
+      .attr("class", "link-label-self")
+      .attr("x", d => {
+        if (d.circular && d.circularPathData) {
+            // Always keep self-loop label horizontally centered in the loop rectangle.
+            // (We avoid overlap with the node title by adjusting Y only.)
+            const c = d.circularPathData;
+            return (c.leftFullExtent + c.rightFullExtent) / 2;
+        }
+        return 0;
+      })
+      .attr("y", d => {
+        if (d.circular && d.circularPathData) {
+            // Place text in the geometric center of the loop:
+            // halfway between the attachment point (sourceY/targetY) and the loop's vertical extent.
+            // If that would overlap with the node name (same Y band) and we cannot shift in X
+            // (loop is too narrow), shift slightly in Y within the loop bounds.
+            const c = d.circularPathData;
+            const sourceY = c.sourceY;
+            const vfe = c.verticalFullExtent;
+            let yMid = (sourceY + vfe) / 2;
+
+            const loopMinX = c.leftFullExtent;
+            const loopMaxX = c.rightFullExtent;
+            const loopW = Math.abs(loopMaxX - loopMinX);
+
+            const nodeCenterX = (d.source.x0 + d.source.x1) / 2;
+            const nodeLabelY = d.source.y0 - 8;
+
+            const name = String(d.source && d.source.name !== undefined ? d.source.name : "");
+            const percent = String(d.value) + "%";
+            const nameHalfW = (name.length * 6) / 2;
+            const percentHalfW = (percent.length * 6) / 2;
+            const pad = 6;
+
+            const xMid = (loopMinX + loopMaxX) / 2;
+            const nearSameY = Math.abs(yMid - nodeLabelY) < 14;
+            const overlapX = Math.abs(xMid - nodeCenterX) < (nameHalfW + percentHalfW + pad);
+
+            const needsAvoid = nearSameY && overlapX;
+            const hasRoomToShiftX = loopW >= (nameHalfW + percentHalfW + pad) * 2 + 8;
+
+            if (needsAvoid) {
+              // Keep X centered; avoid overlap by moving in Y inside the loop.
+              // Node title is above the node; overlap tends to happen with TOP self-loops.
+              // Use a small forbidden band around the nodeLabel baseline, then pick a Y outside it.
+              const textH = 10;
+              const padY = 4;
+              const forbidMin = nodeLabelY - textH / 2 - padY;
+              const forbidMax = nodeLabelY + textH / 2 + padY;
+
+              if (yMid >= forbidMin && yMid <= forbidMax) {
+                if (d.circularLinkType === "top") {
+                  // Move upward inside the loop (smaller Y)
+                  yMid = forbidMin - (textH / 2);
+                } else {
+                  // Bottom loop: move downward (larger Y)
+                  yMid = forbidMax + (textH / 2);
+                }
+              }
+
+              // Clamp within loop vertical bounds.
+              const vMin = Math.min(sourceY, vfe) + 6;
+              const vMax = Math.max(sourceY, vfe) - 6;
+              yMid = Math.min(vMax, Math.max(vMin, yMid));
+            }
+
+            return yMid;
+        }
+        return 0;
+      })
+      // Use true vertical centering (baseline-independent) so the label sits in the visual center.
+      .attr("dominant-baseline", "middle")
+      .attr("text-anchor", "middle")
+      .style("font-size", "10px")
+      .style("fill", "black")
+      .style("font-family", "sans-serif")
+      .text(d => _linkLabelText(d, "self", "link"));
+
     let nodeG = g
       .append("g")
       .attr("class", "nodes")
@@ -1973,6 +2234,7 @@ class SankeyChart {
       .style("transition", "opacity 0.3s ease")
       .text(this.config.id);
 
+    const sankeyGraph = this.graph;
     node.append("title").text(function (d) {
       return d.name;
     });
@@ -2035,6 +2297,39 @@ class SankeyChart {
           .style("opacity", nodeData => 
             connectedNodeNames.has(nodeData.name) ? 1 : dimOpacity
           );
+        
+        // Show labels for connected links
+        linkLabels.style("opacity", (l, i) => {
+          const linkIdx = l.index !== undefined ? l.index : i;
+          return connectedLinkIndices.has(linkIdx) ? 1 : 0;
+        });
+
+        // Node-hover mode: show % at SOURCE end for connected links (and keep self-loop label inside).
+        linkLabels.select(".link-label-source").text(l => _linkLabelText(l, "source", "node", d));
+        linkLabels.select(".link-label-target").text(l => _linkLabelText(l, "target", "node", d));
+        linkLabels.select(".link-label-self").text(l => _linkLabelText(l, "self", "node", d));
+
+        // Small special-case: incoming backlinks from sosisa ◐ into schedule ◐ / schedule ●
+        // when shown at TARGET end on node-hover can overlap the circular arc or a nearby node title.
+        // Put the % above the link stroke at the target end for those specific links.
+        linkLabels.select(".link-label-target")
+          .attr("y", function(l) {
+            const base = _linkLabelAnchorY(l, "target", "below");
+            const txt = this.textContent;
+            if (!txt) return base;
+            if (l && l.circular && l.source && l.target) {
+              const s = l.source.name;
+              const t = l.target.name;
+              const needsAbove =
+                // sosisa ◐ -> schedule ◐/● (bottom circular)
+                (l.circularLinkType === "bottom" && s === "sosisa ◐" && (t === "schedule ◐" || t === "schedule ●")) ||
+                // schedule ○ -> search ◐/● (circular arcs; keep percent above the arc)
+                (s === "schedule ○" && (t === "search ◐" || t === "search ●"));
+
+              if (needsAbove) return _linkLabelAnchorY(l, "target", "above");
+            }
+            return base;
+          });
       })
       .on("mouseleave", function() {
         // Restore all links
@@ -2046,28 +2341,18 @@ class SankeyChart {
           .style("opacity", nodeOpacity);
         g.selectAll(".nodes g text")
           .style("opacity", 1);
-      });
+          
+        // Hide all labels
+        linkLabels.style("opacity", 0);
 
-    // Render order (z-order):
-    // SVG paints in DOM order (later elements are on top). To avoid ugly visual crossings
-    // and to match the expected "entry order" when links overlap, we draw:
-    // - circular links first (behind),
-    // - then non-circular links,
-    // - within each group: thinner first, thicker last.
-    const linksForDraw = this.graph.links
-      .slice()
-      .sort((a, b) => {
-        const aGroup = a && a.circular ? 0 : 1;
-        const bGroup = b && b.circular ? 0 : 1;
-        if (aGroup !== bGroup) return aGroup - bGroup;
+        // Restore default (link-hover) text rules
+        linkLabels.select(".link-label-source").text(l => _linkLabelText(l, "source", "link"));
+        linkLabels.select(".link-label-target").text(l => _linkLabelText(l, "target", "link"));
+        linkLabels.select(".link-label-self").text(l => _linkLabelText(l, "self", "link"));
 
-        const aw = a && typeof a.width === "number" ? a.width : 0;
-        const bw = b && typeof b.width === "number" ? b.width : 0;
-        if (aw !== bw) return aw - bw;
-
-        const ai = a && typeof a.index === "number" ? a.index : 0;
-        const bi = b && typeof b.index === "number" ? b.index : 0;
-        return ai - bi;
+        // Reset any hover-time Y overrides
+        linkLabels.select(".link-label-source").attr("y", l => _linkLabelAnchorY(l, "source", "below"));
+        linkLabels.select(".link-label-target").attr("y", l => _linkLabelAnchorY(l, "target", "below"));
       });
 
     var link = linkG.data(linksForDraw).enter().append("g");
@@ -2109,6 +2394,13 @@ class SankeyChart {
       .style("cursor", "pointer")
       .style("transition", "stroke-opacity 0.3s ease")
       .on("mouseenter", function(event, d) {
+        // Ensure link-hover rules are active (in case we last hovered a node).
+        linkLabels.select(".link-label-source").text(l => _linkLabelText(l, "source", "link"));
+        linkLabels.select(".link-label-target").text(l => _linkLabelText(l, "target", "link"));
+        linkLabels.select(".link-label-self").text(l => _linkLabelText(l, "self", "link"));
+        linkLabels.select(".link-label-source").attr("y", l => _linkLabelAnchorY(l, "source", "below"));
+        linkLabels.select(".link-label-target").attr("y", l => _linkLabelAnchorY(l, "target", "below"));
+
         // Dim all links
         g.selectAll(".sankey-link")
           .style("stroke-opacity", dimOpacity);
@@ -2121,6 +2413,16 @@ class SankeyChart {
         
         // Highlight hovered link
         select(this).style("stroke-opacity", normalLinkOpacity);
+        
+        // Show labels for this link (and its siblings if virtualized)
+        // We need to match the data bound to labels
+        const thisLinkIndex = d.index;
+        const thisParentLink = d.parentLink;
+        linkLabels.style("opacity", (l) => {
+          if (l.index === thisLinkIndex) return 1;
+          if (thisParentLink !== undefined && l.parentLink === thisParentLink) return 1;
+          return 0;
+        });
         
         // Highlight connected nodes
         g.selectAll(".nodes g")
@@ -2160,6 +2462,9 @@ class SankeyChart {
           .style("opacity", normalNodeOpacity);
         g.selectAll(".nodes g text")
           .style("opacity", 1);
+          
+        // Hide labels
+        linkLabels.style("opacity", 0);
       });
 
     link.append("title").text(function (d) {

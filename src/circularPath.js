@@ -37,13 +37,13 @@ export function addCircularPathData(
     return l.circularLinkType == "top";
   });
 
-  calcVerticalBuffer(topLinks, graph.nodes, id, circularLinkGap);
+  calcVerticalBuffer(topLinks, graph.nodes, id, circularLinkGap, graph, verticalMargin);
 
   var bottomLinks = graph.links.filter(function (l) {
     return l.circularLinkType == "bottom";
   });
 
-  calcVerticalBuffer(bottomLinks, graph.nodes, id, circularLinkGap);
+  calcVerticalBuffer(bottomLinks, graph.nodes, id, circularLinkGap, graph, verticalMargin);
 
   // add the base data for each link (radii/extents only; we assign `link.path` after post-passes)
   graph.links.forEach(function (link) {
@@ -69,10 +69,11 @@ export function addCircularPathData(
         // Margin for self-links - keep them compact rectangles (wider than tall).
         // Use small factor so all self-loops have similar proportions regardless of stroke width.
         // Minimum 8px ensures even thin links are visible.
-        var selfLoopMarginFactor = 0.6;
-        var selfLinkMargin = Math.max(8, selfLinkRadius * selfLoopMarginFactor + link.width * 0.4);
+        var selfLoopMarginFactor = 3.0;
+        var selfLinkMargin = Math.max(20, selfLinkRadius * selfLoopMarginFactor + link.width * 0.4);
         // Also add verticalBuffer to account for stacking with other circular links
         var vBuf = link.circularPathData.verticalBuffer || 0;
+        
         // IMPORTANT: keep self-loops compact by NOT applying the generic `baseOffset`
         // that we use for other circular links. Self-loops are handled by:
         // - their own small `selfLinkMargin`, and
@@ -230,11 +231,10 @@ export function addCircularPathData(
           // 1) primary key: span (distance from source column) — farther sources are more outer (further left)
           // 2) if span ties (=> same source column), lower source nodes should be more inner (more right)
           //    than higher source nodes.
-          var aTgtName = a.target && a.target.name ? a.target.name : undefined;
-          var bTgtName = b.target && b.target.name ? b.target.name : undefined;
+          var sameTargetNode = (a.target === b.target);
           var ad = Math.abs((a.source.column || 0) - (a.target.column || 0));
           var bd = Math.abs((b.source.column || 0) - (b.target.column || 0));
-          if (aIsBottomBacklink && bIsBottomBacklink && aTgtName && bTgtName && aTgtName === bTgtName) {
+          if (aIsBottomBacklink && bIsBottomBacklink && sameTargetNode) {
             if (ad !== bd) return ad - bd; // nearer (smaller span) first => more inner (right)
             // span tie => same source column: lower source should be more inner (right) => earlier in radius list
             var aSrcY = (a.source.y0 + a.source.y1) / 2;
@@ -266,57 +266,62 @@ export function addCircularPathData(
           radiusOffset = radiusOffset + l.width + circularLinkGap;
         });
 
-        // Use shared group extents computed in calcVerticalBuffer to keep bundles aligned.
-        // Prefer per-link extents for compact routing when the link is "local":
-        // - same-column circular links (source.column === target.column),
-        // - very short-span links (span <= 1).
-        // Otherwise, use group extents to keep bundles aligned.
+        // Baseline extents (where the link "escapes" from).
+        //
+        // Key tradeoff:
+        // - Some *local* circular links (especially BOTTOM span<=1) must stay compact and should NOT inherit
+        //   the baseline of long links in the same target column (that creates huge depth).
+        // - But for TOP bundles, using per-link baselines for span<=1 can make a link "drift" out of its
+        //   target-column bundle (different baselineMinY => different VFE), i.e. it looks \"out of group\".
+        //
+        // Rule:
+        // - same-column circulars: always per-link baseline (very local geometry).
+        // - span<=1:
+        //   - bottom band: per-link baseline (compactness is critical).
+        //   - top band: group baseline (bundle coherence), except for `search_nearby` which we keep compact.
+        // - span>1: group baseline when available.
         var sameColumnCircular = link.source && link.target && link.source.column === link.target.column;
         var span = Math.abs((link.source.column || 0) - (link.target.column || 0));
-        var preferPerLinkExtents = sameColumnCircular || span <= 1;
-        var relevantMinY;
-        var relevantMaxY;
+        var preferPerLinkBaseline =
+          sameColumnCircular ||
+          (span <= 1 &&
+            (link.circularLinkType === "bottom" ||
+              (link.circularLinkType === "top" && link.type === "search_nearby")));
 
-        if (preferPerLinkExtents && link.circularPathData) {
-          if (typeof link.circularPathData._extMinY === "number") {
-            relevantMinY = link.circularPathData._extMinY;
-          }
-          if (typeof link.circularPathData._extMaxY === "number") {
-            relevantMaxY = link.circularPathData._extMaxY;
-          }
-        }
+        var baselineMinY;
+        var baselineMaxY;
 
-        // Fallback / default: group extents when available, otherwise per-link node extents.
-        if (typeof relevantMinY !== "number") {
-          relevantMinY = (link.circularPathData && typeof link.circularPathData.groupMinY === "number")
-            ? link.circularPathData.groupMinY
-            : Math.min(link.source.y0, link.target.y0);
+        if (!preferPerLinkBaseline && link.circularPathData) {
+          if (typeof link.circularPathData.groupMinY === "number") baselineMinY = link.circularPathData.groupMinY;
+          if (typeof link.circularPathData.groupMaxY === "number") baselineMaxY = link.circularPathData.groupMaxY;
         }
-        if (typeof relevantMaxY !== "number") {
-          relevantMaxY = (link.circularPathData && typeof link.circularPathData.groupMaxY === "number")
-            ? link.circularPathData.groupMaxY
-            : Math.max(link.source.y1, link.target.y1);
+        if (preferPerLinkBaseline && link.circularPathData) {
+          if (typeof link.circularPathData._extMinY === "number") baselineMinY = link.circularPathData._extMinY;
+          if (typeof link.circularPathData._extMaxY === "number") baselineMaxY = link.circularPathData._extMaxY;
         }
+        // Final fallback
+        if (typeof baselineMinY !== "number") baselineMinY = Math.min(link.source.y0, link.target.y0);
+        if (typeof baselineMaxY !== "number") baselineMaxY = Math.max(link.source.y1, link.target.y1);
 
-        // If this link is part of a bundle (multiple links targeting the same column),
-        // always use the group extents for baseOffset sizing. Otherwise short-span links
-        // can compute a smaller columnHeight and fail to reach the bundle's height.
+        // Sizing extents (for baseOffset sizing only): we can use group extents to keep
+        // bundle sizing coherent, but we must NOT use them as baseline.
+        var sizingMinY = baselineMinY;
+        var sizingMaxY = baselineMaxY;
         if (
           link.circularPathData &&
           link.circularPathData.groupSize > 1 &&
           typeof link.circularPathData.groupMinY === "number" &&
           typeof link.circularPathData.groupMaxY === "number"
         ) {
-          relevantMinY = link.circularPathData.groupMinY;
-          relevantMaxY = link.circularPathData.groupMaxY;
+          sizingMinY = link.circularPathData.groupMinY;
+          sizingMaxY = link.circularPathData.groupMaxY;
         }
 
         // Base offset controls how far the circular link "escapes" above/below the main diagram.
         // Use an adaptive value, but cap it tightly to avoid excessive vertical gaps.
         // Make baseOffset span-dependent: short links stay closer to nodes.
-        var columnHeight = relevantMaxY - relevantMinY;
+        var columnHeight = sizingMaxY - sizingMinY;
         var linkSpan = Math.abs((link.source.column || 0) - (link.target.column || 0));
-        
         // For short-span links (≤2 columns), use smaller baseOffset to keep them compact.
         // For longer backlinks, allow more vertical escape to avoid crossing horizontal flow.
         var spanFactor = linkSpan <= 1 ? 0.04 : (linkSpan === 2 ? 0.06 : 0.08);
@@ -336,7 +341,7 @@ export function addCircularPathData(
         // bottom links
         if (link.circularLinkType == "bottom") {
           link.circularPathData.verticalFullExtent =
-            relevantMaxY + totalOffset;
+            baselineMaxY + totalOffset;
           link.circularPathData.verticalRightInnerExtent =
             link.circularPathData.verticalFullExtent -
             link.circularPathData.rightLargeArcRadius;
@@ -346,7 +351,7 @@ export function addCircularPathData(
         } else {
           // top links
           link.circularPathData.verticalFullExtent =
-            relevantMinY - totalOffset;
+            baselineMinY - totalOffset;
           link.circularPathData.verticalRightInnerExtent =
             link.circularPathData.verticalFullExtent +
             link.circularPathData.rightLargeArcRadius;
@@ -360,8 +365,10 @@ export function addCircularPathData(
             type: link.circularLinkType,
             span: Math.abs((link.source.column || 0) - (link.target.column || 0)),
             width: link.width,
-            relevantMinY: relevantMinY,
-            relevantMaxY: relevantMaxY,
+            baselineMinY: baselineMinY,
+            baselineMaxY: baselineMaxY,
+            sizingMinY: sizingMinY,
+            sizingMaxY: sizingMaxY,
             groupMinY: link.circularPathData.groupMinY,
             groupMaxY: link.circularPathData.groupMaxY,
             columnHeight: columnHeight,
@@ -644,6 +651,10 @@ export function addCircularPathData(
       for (var bi = 1; bi < bottomCircular.length; bi++) {
         var prevL = bottomCircular[bi - 1];
         var currL = bottomCircular[bi];
+        // Only enforce a gap when these two links can actually overlap/cross.
+        // Otherwise this "global band" rule creates artificial holes by pushing
+        // unrelated links further down.
+        if (!circularLinksActuallyCross(prevL, currL)) continue;
         var prevBottom =
           prevL.circularPathData.verticalFullExtent + (prevL.width || 0) / 2;
         var currTop =
@@ -662,6 +673,54 @@ export function addCircularPathData(
       }
       if (!changed) break;
     }
+  }
+
+  // Post-pass: enforce minimum vertical gap WITHIN each TOP target-node bundle.
+  //
+  // The global TOP min-gap pass only considers adjacency in overall VFE order; links targeting
+  // the same node can still end up intersecting if other links sit between them globally.
+  // This per-target pass ensures all TOP links into the same target node have >= circularGap.
+  var perTargetTopGap = circularLinkGap || 0;
+  if (perTargetTopGap > 0) {
+    var topByTarget = new Map();
+    graph.links.forEach(function(l) {
+      if (!l || !l.circular || l.isVirtual || l.circularLinkType !== "top") return;
+      if (!l.circularPathData || typeof l.circularPathData.verticalFullExtent !== "number") return;
+      if (!l.target) return;
+      var key = l.target; // object identity
+      var arr = topByTarget.get(key);
+      if (!arr) { arr = []; topByTarget.set(key, arr); }
+      arr.push(l);
+    });
+
+    var maxPerTargetIters = 10;
+    topByTarget.forEach(function(group) {
+      if (!group || group.length < 2) return;
+      for (var itPT = 0; itPT < maxPerTargetIters; itPT++) {
+        var changedPT = false;
+        // Inner first (closer to nodes) = higher VFE
+        group.sort(function(a, b) {
+          return b.circularPathData.verticalFullExtent - a.circularPathData.verticalFullExtent;
+        });
+        for (var gi = 1; gi < group.length; gi++) {
+          var inner = group[gi - 1];
+          var outer = group[gi];
+          var innerTopEdge = inner.circularPathData.verticalFullExtent - (inner.width || 0) / 2;
+          var outerBottomEdge = outer.circularPathData.verticalFullExtent + (outer.width || 0) / 2;
+          var gapNow = innerTopEdge - outerBottomEdge;
+          if (gapNow < perTargetTopGap) {
+            var pushUp = (perTargetTopGap - gapNow) + 1e-6;
+            // Push outer UP (more outer = higher visually) => decrease its VFE
+            outer.circularPathData.verticalFullExtent -= pushUp;
+            if (typeof outer.circularPathData.verticalBuffer === "number") {
+              outer.circularPathData.verticalBuffer += pushUp;
+            }
+            changedPT = true;
+          }
+        }
+        if (!changedPT) break;
+      }
+    });
   }
 
   // Post-pass: enforce global minimum vertical gap between ALL top circular links.
@@ -691,6 +750,8 @@ export function addCircularPathData(
       for (var ti = 1; ti < topCircular.length; ti++) {
         var prevT = topCircular[ti - 1]; // higher VFE = closer to nodes
         var currT = topCircular[ti];     // lower VFE = further from nodes (higher visually)
+        // Only enforce a gap when these two links can actually overlap/cross.
+        if (!circularLinksActuallyCross(prevT, currT)) continue;
         // prev is "inner" (closer to nodes), curr is "outer" (further up)
         var prevTopEdge = prevT.circularPathData.verticalFullExtent - (prevT.width || 0) / 2;
         var currBottomEdge = currT.circularPathData.verticalFullExtent + (currT.width || 0) / 2;
@@ -732,7 +793,10 @@ export function addCircularPathData(
     }
   });
 
-  // Finally: assign link.path for rendering
+  graph.links.forEach(function(link) {
+    if (link.circular) {
+      link.path = createCircularPathString(link);
+    } else {
   var normalPath = linkHorizontal()
     .source(function (d) {
       var x = d.source.x0 + (d.source.x1 - d.source.x0);
@@ -744,11 +808,6 @@ export function addCircularPathData(
       var y = d.y1;
       return [x, y];
     });
-
-  graph.links.forEach(function(link) {
-    if (link.circular) {
-      link.path = createCircularPathString(link);
-    } else {
       link.path = normalPath(link);
     }
   });
@@ -757,7 +816,7 @@ export function addCircularPathData(
 }
 
 // creates vertical buffer values per set of top/bottom links
-function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
+function calcVerticalBuffer(links, nodes, id, circularLinkGap, graph, verticalMargin) {
   function dbg(link) {
     return !!(link && link._debugCircular);
   }
@@ -846,9 +905,8 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
         a.circularLinkType === "bottom" && (a.target.column || 0) < (a.source.column || 0);
       var bIsBacklink0 =
         b.circularLinkType === "bottom" && (b.target.column || 0) < (b.source.column || 0);
-      var aTgtName0 = a.target && a.target.name ? a.target.name : undefined;
-      var bTgtName0 = b.target && b.target.name ? b.target.name : undefined;
-      if (aIsBacklink0 && bIsBacklink0 && aTgtName0 && bTgtName0 && aTgtName0 === bTgtName0) {
+      var sameTargetNode0 = (a.target === b.target);
+      if (aIsBacklink0 && bIsBacklink0 && sameTargetNode0) {
         var distA0 = Math.abs(a.source.column - a.target.column);
         var distB0 = Math.abs(b.source.column - b.target.column);
         if (distA0 === distB0 && a.source.column === b.source.column) {
@@ -866,9 +924,8 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
         a.circularLinkType === "bottom" && (a.target.column || 0) < (a.source.column || 0);
       var bIsBottomBacklink =
         b.circularLinkType === "bottom" && (b.target.column || 0) < (b.source.column || 0);
-      var aTgtName = a.target && a.target.name ? a.target.name : undefined;
-      var bTgtName = b.target && b.target.name ? b.target.name : undefined;
-      if (aIsBottomBacklink && bIsBottomBacklink && aTgtName && bTgtName && aTgtName === bTgtName) {
+      var sameTargetNode1 = (a.target === b.target);
+      if (aIsBottomBacklink && bIsBottomBacklink && sameTargetNode1) {
         var distA1 = Math.abs(a.source.column - a.target.column);
         var distB1 = Math.abs(b.source.column - b.target.column);
         // Nearer first => smaller verticalBuffer => smaller verticalFullExtent (higher bottom boundary).
@@ -919,6 +976,58 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
     });
   });
 
+  // Pre-compute baseOffset *here* so verticalBuffer stacking can compensate for it.
+  // Without this, links with larger baseOffset (e.g. longer spans) get pushed down/up
+  // by BOTH verticalBuffer and baseOffset differences, creating artificial holes even
+  // within the same target bundle.
+  var diagramY0 = (graph && typeof graph.y0 === "number") ? graph.y0 : undefined;
+  var diagramY1 = (graph && typeof graph.y1 === "number") ? graph.y1 : undefined;
+  if (typeof diagramY0 !== "number" || typeof diagramY1 !== "number") {
+    diagramY0 = Infinity;
+    diagramY1 = -Infinity;
+    (nodes || []).forEach(function(n) {
+      if (!n) return;
+      if (typeof n.y0 === "number") diagramY0 = Math.min(diagramY0, n.y0);
+      if (typeof n.y1 === "number") diagramY1 = Math.max(diagramY1, n.y1);
+    });
+    if (diagramY0 === Infinity) diagramY0 = 0;
+    if (diagramY1 === -Infinity) diagramY1 = 0;
+  }
+  var diagramHeight = diagramY1 - diagramY0;
+  var vMargin = (typeof verticalMargin === "number") ? verticalMargin : 0;
+
+  links.forEach(function(link) {
+    if (!link || !link.circularPathData) return;
+    // Self-loops handle baseOffset separately (forced 0) and don't participate in this correction.
+    if (selfLinking(link, id)) {
+      link.circularPathData._baseOffsetForBuffer = 0;
+      return;
+    }
+    var relevantMinY = (typeof link.circularPathData._extMinY === "number")
+      ? link.circularPathData._extMinY
+      : Math.min(link.source.y0, link.target.y0);
+    var relevantMaxY = (typeof link.circularPathData._extMaxY === "number")
+      ? link.circularPathData._extMaxY
+      : Math.max(link.source.y1, link.target.y1);
+
+    if (
+      link.circularPathData.groupSize > 1 &&
+      typeof link.circularPathData.groupMinY === "number" &&
+      typeof link.circularPathData.groupMaxY === "number"
+    ) {
+      relevantMinY = link.circularPathData.groupMinY;
+      relevantMaxY = link.circularPathData.groupMaxY;
+    }
+
+    var columnHeight = relevantMaxY - relevantMinY;
+    var linkSpan = Math.abs((link.source.column || 0) - (link.target.column || 0));
+    var spanFactor = linkSpan <= 1 ? 0.04 : (linkSpan === 2 ? 0.06 : 0.08);
+    var desiredBaseOffset = Math.max(vMargin + link.width + 2, columnHeight * spanFactor);
+    var capFactor = linkSpan <= 2 ? 0.03 : 0.045;
+    var maxAllowedBaseOffset = Math.max(vMargin, diagramHeight * capFactor);
+    link.circularPathData._baseOffsetForBuffer = Math.min(desiredBaseOffset, maxAllowedBaseOffset);
+  });
+
   // Order groups to minimize crossings:
   // - Prefer groups with smaller MAX span first (inner)
   // - Larger-span groups later (outer)
@@ -948,7 +1057,13 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
       });
       if (maxDistA !== maxDistB) return maxDistA - maxDistB;
 
-      // TOP-only: if min target.y0 is the same, prefer smaller target height first.
+      // TOP-only tie-breakers:
+      // 1) Prefer groups whose targets are LOWER in the diagram first (larger min target.y0).
+      //    Rationale: earlier processing => smaller verticalBuffer => TOP arcs stay closer to nodes
+      //    (less escape upward). This prevents a lower target (e.g. `schedule ○`) from being pushed
+      //    above neighboring bundles with the same maxSpan (e.g. col=4 `listing ○`/`filter` bundle).
+      //
+      // 2) If min target.y0 is the same, prefer smaller target height first.
       // NOTE: We compute this on the fly to avoid mutating group state.
       if (a.links.length && a.links[0].circularLinkType === "top") {
         function groupMinTargetY0AndHeight(links) {
@@ -972,9 +1087,16 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
         }
         var ma = groupMinTargetY0AndHeight(a.links);
         var mb = groupMinTargetY0AndHeight(b.links);
-        if (Math.abs(ma.minY0 - mb.minY0) < 1e-6) {
-          if (ma.minHAtMinY0 !== mb.minHAtMinY0) return ma.minHAtMinY0 - mb.minHAtMinY0;
+        // For TOP links: when maxSpan ties, prefer groups targeting columns more to the RIGHT first.
+        // Earlier processing => smaller verticalBuffer => arcs stay closer to nodes (less escape upward).
+        // This matches the requested ordering: backlinks into `schedule ○` (col 5) should sit below
+        // backlinks into col 4 targets like `listing ○` and `filter` when maxSpan ties.
+        if (a.col !== b.col) return b.col - a.col;
+        if (Math.abs(ma.minY0 - mb.minY0) >= 1e-6) {
+          // Descending: lower targets first
+          return mb.minY0 - ma.minY0;
         }
+        if (ma.minHAtMinY0 !== mb.minHAtMinY0) return ma.minHAtMinY0 - mb.minHAtMinY0;
       }
 
       // Then bigger groups first (stable packing)
@@ -994,9 +1116,11 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
   // Process links in grouped order
   orderedLinks.forEach(function (link, i) {
     var buffer = 0;
-    var srcName = link.source.name || link.source.index;
-    var tgtName = link.target.name || link.target.index;
+    // NOTE: avoid using node names in non-debug logic; keep names only for optional debug output.
     var maxCause = null; // { j, prev, gap, offsetCorrection, bufferOver }
+    // Optional: capture the full chain of pushes for post-mortem debugging.
+    // Enabled only when link._debugCircular is set (to avoid perf impact / log noise).
+    var pushCauses = dbg(link) ? [] : null;
 
     // Find current group
     var currentGroupIndex = orderedGroups.findIndex(function(g) {
@@ -1028,10 +1152,17 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
         
         if (circularLinksActuallyCross(link, prevLink)) {
           // Check if both links share at least one node (for tighter spacing)
-          var sameNode = (link.source.name === prevLink.source.name || 
-                         link.source.name === prevLink.target.name ||
-                         link.target.name === prevLink.source.name ||
-                         link.target.name === prevLink.target.name);
+          function sameNodeRef2(a, b) {
+            if (a === b) return true;
+            if (a && b && a.name !== undefined && b.name !== undefined) return a.name === b.name;
+            return false;
+          }
+          var sameNode = (
+            sameNodeRef2(link.source, prevLink.source) ||
+            sameNodeRef2(link.source, prevLink.target) ||
+            sameNodeRef2(link.target, prevLink.source) ||
+            sameNodeRef2(link.target, prevLink.target)
+          );
           // Use no gap ONLY if both are self-links AND they share a node
           var gap = circularLinkGap;
           if (selfLinking(link, id) && selfLinking(prevLink, id) && sameNode) {
@@ -1094,13 +1225,18 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
         // Different groups or valid same-group previous - check crossing
 
         if (circularLinksActuallyCross(link, prevLink)) {
-          var prevSrcName = prevLink.source.name || prevLink.source.index;
-          var prevTgtName = prevLink.target.name || prevLink.target.index;
-          // Check if both links share at least one node
-          var sameNode = (link.source.name === prevLink.source.name || 
-                         link.source.name === prevLink.target.name ||
-                         link.target.name === prevLink.source.name ||
-                         link.target.name === prevLink.target.name);
+          // Check if both links share at least one node (object identity preferred; fallback to name for safety).
+          function sameNodeRef(a, b) {
+            if (a === b) return true;
+            if (a && b && a.name !== undefined && b.name !== undefined) return a.name === b.name;
+            return false;
+          }
+          var sameNode = (
+            sameNodeRef(link.source, prevLink.source) ||
+            sameNodeRef(link.source, prevLink.target) ||
+            sameNodeRef(link.target, prevLink.source) ||
+            sameNodeRef(link.target, prevLink.target)
+          );
           // Use no gap ONLY if both are self-links AND they share a node
           var gap = circularLinkGap;
           if (selfLinking(link, id) && selfLinking(prevLink, id) && sameNode) {
@@ -1112,20 +1248,48 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
             prevLink.width / 2 +
             gap;
           
-          // Fix for visual hole: adjust buffer requirement based on vertical separation of base positions
+          // Adjust buffer requirement based on vertical separation of effective base positions.
+          // Effective base includes `baseOffset`, otherwise span-dependent baseOffset creates
+          // artificial holes between links that are already correctly stacked by verticalBuffer.
           var thisBaseY = link.circularPathData.baseY;
           var prevBaseY = prevLink.circularPathData.baseY;
+          // Only include baseOffset in the correction for BOTTOM links.
+          // For TOP links, span-dependent baseOffset also encodes "how far up we escape",
+          // and compensating it here can invert the desired nesting order (span monotonicity),
+          // increasing crossings. Bottom bundles are the reported source of holes.
+          var thisBaseOffset =
+            (link.circularLinkType === "bottom" &&
+              link.circularPathData &&
+              typeof link.circularPathData._baseOffsetForBuffer === "number")
+              ? link.circularPathData._baseOffsetForBuffer
+              : 0;
+          var prevBaseOffset =
+            (prevLink.circularLinkType === "bottom" &&
+              prevLink.circularPathData &&
+              typeof prevLink.circularPathData._baseOffsetForBuffer === "number")
+              ? prevLink.circularPathData._baseOffsetForBuffer
+              : 0;
+          var thisEffectiveBase =
+            (link.circularLinkType === "bottom") ? (thisBaseY + thisBaseOffset) : thisBaseY;
+          var prevEffectiveBase =
+            (prevLink.circularLinkType === "bottom") ? (prevBaseY + prevBaseOffset) : prevBaseY;
           var offsetCorrection = 0;
           
-          // Do not reduce spacing for the same target-column bundle (keeps circularGap)
-          if (link.target.column !== prevLink.target.column) {
-            if (link.circularLinkType === "bottom") {
-              // For bottom links (curve down), if this link is naturally lower (larger BaseY)
-              // than the previous link, we need less buffer.
-              offsetCorrection = prevBaseY - thisBaseY;
-            } else {
-              // For top links (curve up), if this link is naturally higher (smaller BaseY)
-              // than the previous link, we need less buffer.
+          if (link.circularLinkType === "bottom") {
+            // BaseOffset correction should ALWAYS apply (even within same target column),
+            // because span-dependent baseOffset is what creates holes inside bundles.
+            offsetCorrection = prevBaseOffset - thisBaseOffset;
+            // BaseY correction should only apply across different target columns; within the
+            // same target column we must preserve the configured circularGap near node entry.
+            if (link.target.column !== prevLink.target.column) {
+              offsetCorrection += (prevBaseY - thisBaseY);
+            }
+          } else {
+            // TOP links: only apply BaseY correction across different target columns.
+            // Within the same target column, reducing buffer here can cause overlaps and
+            // can invert the desired span nesting order.
+            offsetCorrection = 0;
+            if (link.target.column !== prevLink.target.column) {
               offsetCorrection = thisBaseY - prevBaseY;
             }
           }
@@ -1133,14 +1297,23 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
           if (offsetCorrection > 0) offsetCorrection = 0;
           
           bufferOverThisLink += offsetCorrection;
-          // Enforce minimum gap even after correction to prevent overlap.
-          // The minimum is: previous link's extent + gap between links.
-          var minBuffer = prevLink.circularPathData.verticalBuffer + prevLink.width / 2 + circularLinkGap;
-          if (bufferOverThisLink < minBuffer) bufferOverThisLink = minBuffer;
           
           if (bufferOverThisLink > buffer) {
             buffer = bufferOverThisLink;
             maxCause = { j: j, prev: prevLink, gap: gap, offsetCorrection: offsetCorrection, bufferOver: bufferOverThisLink };
+            if (pushCauses) {
+              pushCauses.push({
+                prev: nameOf(prevLink),
+                j: j,
+                gap: gap,
+                offsetCorrection: offsetCorrection,
+                prevVB: prevLink.circularPathData.verticalBuffer,
+                prevW: prevLink.width,
+                thisBaseY: link.circularPathData.baseY,
+                prevBaseY: prevLink.circularPathData.baseY,
+                bufferOver: +bufferOverThisLink.toFixed(2),
+              });
+            }
           }
           if (dbg(link) || dbg(prevLink)) {
             console.log(
@@ -1167,6 +1340,8 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
       // Height control is done in addCircularPathData via baseOffset caps.
       link.circularPathData.verticalBuffer = finalBuffer;
       if (dbg(link)) {
+        // Store for programmatic inspection (e.g. from node scripts) without scraping console.
+        link.circularPathData._debugPushCauses = pushCauses;
         console.log(
           "[circular/vBuf] FINAL",
           nameOf(link),
@@ -1184,6 +1359,7 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap) {
                   bufferOver: +maxCause.bufferOver.toFixed(2),
                 }
               : null,
+            pushes: pushCauses ? pushCauses.length : 0,
           }
         );
       }
@@ -1248,15 +1424,9 @@ function circularLinksActuallyCross(link1, link2) {
   var rangesOverlap = link1Max >= link2Min && link2Max >= link1Min;
   
   if (!rangesOverlap) {
-    // Even if column ranges don't overlap, circular links can still visually overlap
-    // in the vertical space at the top/bottom of the chart. Check if both are same
-    // circularLinkType (both top or both bottom) - they share the same "escape" space.
-    if (link1.circularLinkType && link2.circularLinkType && 
-        link1.circularLinkType === link2.circularLinkType) {
-      // Both links curve in the same direction (both top or both bottom).
-      // They need to be stacked vertically to avoid overlap.
-      return true;
-    }
+    // If column ranges don't overlap at all, these links cannot cross:
+    // their horizontal segments live in disjoint column spans, so stacking them globally
+    // (just because both are TOP or both are BOTTOM) creates unnecessary "holes".
     return false;
   }
   
@@ -1315,7 +1485,19 @@ function circularLinksActuallyCross(link1, link2) {
     var c = overlapStart;
     var link1HasEndpointAt = (link1Source === c || link1Target === c);
     var link2HasEndpointAt = (link2Source === c || link2Target === c);
-    if (link1HasEndpointAt && link2HasEndpointAt) return true;
+    if (link1HasEndpointAt && link2HasEndpointAt) {
+      // More precise boundary-touch handling:
+      // Two circular links that only TOUCH at a boundary column should only be considered
+      // potentially crossing if their touching endpoints are on the SAME side of that column.
+      // - source column => right shoulder/leg region (at the source node)
+      // - target column => left shoulder/leg region (at the target node)
+      //
+      // If one touches at `source` and the other touches at `target` (common for chained backlinks),
+      // they are on opposite sides of the node and should not force vertical stacking.
+      var bothTouchAsSource = (link1Source === c && link2Source === c);
+      var bothTouchAsTarget = (link1Target === c && link2Target === c);
+      if (bothTouchAsSource || bothTouchAsTarget) return true;
+    }
   }
 
   // For non-self links with overlapping ranges, we only need stacking if a vertical

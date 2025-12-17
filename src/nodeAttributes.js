@@ -60,9 +60,12 @@ export function getSelfLinksHeight(node, id, baseRadius) {
         if (l.circular && selfLinking(l, id)) {
             // Match the formula from circularPath.js:
             // selfLinkRadius = baseRadius + link.width / 2
-            // selfLinkMargin = selfLinkRadius * 2 + link.width
+            // selfLinkMargin = Math.max(8, selfLinkRadius * 0.6 + link.width * 0.4)
             var selfLinkRadius = (baseRadius || 10) + l.width / 2;
-            var linkHeight = selfLinkRadius * 2 + l.width;
+            var selfLoopMarginFactor = 3.0;
+            var selfLinkMargin = Math.max(20, selfLinkRadius * selfLoopMarginFactor + l.width * 0.4);
+            // verticalBuffer is max 5px for self-links
+            var linkHeight = selfLinkMargin + 5;
             
             if (l.circularLinkType === "bottom") {
                 if (linkHeight > bottomHeight) {
