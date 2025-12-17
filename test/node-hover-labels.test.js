@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { _linkLabelText, _linkLabelAnchorX, _linkLabelAnchorY } from "../src/sankeyPlus.js";
+import { _linkLabelText, _linkLabelAnchorX, _linkLabelAnchorY, _selfLoopLabelAnchorY } from "../src/sankeyPlus.js";
 
 test("node-hover: if hovered node is target, show value at source end (neighbor)", () => {
   const pathStart = { name: "path_start", index: 1, column: 0 };
@@ -46,6 +46,28 @@ test("node-hover: self-loop label stays inside loop; source/target labels empty"
   assert.equal(_linkLabelText(self, "self", "node", n), "10%");
   assert.equal(_linkLabelText(self, "source", "node", n), "");
   assert.equal(_linkLabelText(self, "target", "node", n), "");
+});
+
+test("self-loop hover label: if loop is too narrow and overlaps node title band, place % outside above the loop (top)", () => {
+  const n = { name: "schedule ○", index: 42, column: 2, x0: 90, x1: 110, y0: 80, y1: 100 };
+  const self = {
+    source: n,
+    target: n,
+    value: 10,
+    width: 10,
+    circular: true,
+    circularLinkType: "top",
+    circularPathData: {
+      sourceY: 100,
+      verticalFullExtent: 60, // top loop extends upward
+      leftFullExtent: 96,
+      rightFullExtent: 104, // very narrow loop => can't fit inside
+    },
+  };
+
+  const y = _selfLoopLabelAnchorY(self);
+  // Outside above loop => y should be above verticalFullExtent.
+  assert.ok(y < self.circularPathData.verticalFullExtent - 1, `Expected y above loop, got ${y}`);
 });
 
 test("label X anchor: replaced links fall back to stitched x0/x1 when node coords are missing", () => {

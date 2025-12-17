@@ -45,6 +45,65 @@ function _isBacklinkForLabels(d) {
   return !_isSelfLinkForLabels(d) && (d && d.source && d.target) && ((d.source.column || 0) > (d.target.column || 0));
 }
 
+// Exported for tests/debugging: resolve label Y for self-loop labels.
+// By default we keep the label inside the loop; when the loop is too narrow and the label
+// would overlap the node title, we place it just outside the loop on the "outer" side.
+export function _selfLoopLabelAnchorY(d) {
+  if (!d || !(d.circular && d.circularPathData) || !_isSelfLinkForLabels(d)) return 0;
+  const c = d.circularPathData;
+  const sourceY = c.sourceY;
+  const vfe = c.verticalFullExtent;
+  if (!Number.isFinite(sourceY) || !Number.isFinite(vfe)) return 0;
+
+  // Default: center in the loop rectangle.
+  let yMid = (sourceY + vfe) / 2;
+
+  // Detect overlap with the node title band (text drawn at y0 - 8).
+  const loopMinX = c.leftFullExtent;
+  const loopMaxX = c.rightFullExtent;
+  const loopW = Number.isFinite(loopMinX) && Number.isFinite(loopMaxX) ? Math.abs(loopMaxX - loopMinX) : 0;
+  const nodeCenterX = (d.source?.x0 + d.source?.x1) / 2;
+  const nodeLabelY = (d.source?.y0 ?? 0) - 8;
+
+  const name = String(d.source && d.source.name !== undefined ? d.source.name : "");
+  const percent = String(d.value) + "%";
+  const nameHalfW = (name.length * 6) / 2;
+  const percentHalfW = (percent.length * 6) / 2;
+  const pad = 6;
+
+  const xMid = (loopMinX + loopMaxX) / 2;
+  const nearSameY = Math.abs(yMid - nodeLabelY) < 14;
+  const overlapX = Math.abs(xMid - nodeCenterX) < (nameHalfW + percentHalfW + pad);
+  const needsAvoid = nearSameY && overlapX;
+
+  const hasRoomToShiftX = loopW >= (nameHalfW + percentHalfW + pad) * 2 + 8;
+
+  if (needsAvoid && !hasRoomToShiftX) {
+    // Not enough room inside the loop -> move the percent outside the loop on the outer side.
+    const halfW = Math.max(1, d.width || 0) / 2;
+    const offset = 10 + halfW;
+    if (d.circularLinkType === "top") return Math.max(0, vfe - offset);
+    return vfe + offset;
+  }
+
+  // Otherwise keep it inside but avoid the title band (existing behavior).
+  if (needsAvoid) {
+    const textH = 10;
+    const padY = 4;
+    const forbidMin = nodeLabelY - textH / 2 - padY;
+    const forbidMax = nodeLabelY + textH / 2 + padY;
+    if (yMid >= forbidMin && yMid <= forbidMax) {
+      if (d.circularLinkType === "top") yMid = forbidMin - (textH / 2);
+      else yMid = forbidMax + (textH / 2);
+    }
+    const vMin = Math.min(sourceY, vfe) + 6;
+    const vMax = Math.max(sourceY, vfe) - 6;
+    yMid = Math.min(vMax, Math.max(vMin, yMid));
+  }
+
+  return yMid;
+}
+
 // Exported for tests/debugging (does not affect rendering unless used by draw()).
 export function _linkLabelText(d, position, mode, hoveredNode) {
   // position: "source" | "target" | "self"
@@ -2247,6 +2306,27 @@ class SankeyChart {
       .style("opacity", 0)
       .style("transition", "opacity 0.3s ease");
 
+    // Avoid flicker on node mouseleave:
+    // We fade labels out (opacity transition) and only THEN reset their text/anchor positions.
+    // Otherwise, the immediate reset can be visible for a single frame while opacity > 0.
+    let pendingLabelResetTimer = null;
+    const scheduleLabelResetAfterFade = () => {
+      if (pendingLabelResetTimer != null) {
+        try { clearTimeout(pendingLabelResetTimer); } catch (e) { /* ignore */ }
+      }
+      pendingLabelResetTimer = setTimeout(() => {
+        pendingLabelResetTimer = null;
+        // Restore default (link-hover) text rules
+        linkLabels.select(".link-label-source").text(l => _linkLabelText(l, "source", "link"));
+        linkLabels.select(".link-label-target").text(l => _linkLabelText(l, "target", "link"));
+        linkLabels.select(".link-label-self").text(l => _linkLabelText(l, "self", "link"));
+
+        // Reset any hover-time Y overrides
+        linkLabels.select(".link-label-source").attr("y", l => _linkLabelAnchorY(l, "source", "below"));
+        linkLabels.select(".link-label-target").attr("y", l => _linkLabelAnchorY(l, "target", "below"));
+      }, 310); // slightly > 0.3s transition
+    };
+
     // Source label (For Backlinks)
     linkLabels.append("text")
       .attr("class", "link-label-source")
@@ -2284,61 +2364,7 @@ class SankeyChart {
       })
       .attr("y", d => {
         if (d.circular && d.circularPathData) {
-            // Place text in the geometric center of the loop:
-            // halfway between the attachment point (sourceY/targetY) and the loop's vertical extent.
-            // If that would overlap with the node name (same Y band) and we cannot shift in X
-            // (loop is too narrow), shift slightly in Y within the loop bounds.
-            const c = d.circularPathData;
-            const sourceY = c.sourceY;
-            const vfe = c.verticalFullExtent;
-            let yMid = (sourceY + vfe) / 2;
-
-            const loopMinX = c.leftFullExtent;
-            const loopMaxX = c.rightFullExtent;
-            const loopW = Math.abs(loopMaxX - loopMinX);
-
-            const nodeCenterX = (d.source.x0 + d.source.x1) / 2;
-            const nodeLabelY = d.source.y0 - 8;
-
-            const name = String(d.source && d.source.name !== undefined ? d.source.name : "");
-            const percent = String(d.value) + "%";
-            const nameHalfW = (name.length * 6) / 2;
-            const percentHalfW = (percent.length * 6) / 2;
-            const pad = 6;
-
-            const xMid = (loopMinX + loopMaxX) / 2;
-            const nearSameY = Math.abs(yMid - nodeLabelY) < 14;
-            const overlapX = Math.abs(xMid - nodeCenterX) < (nameHalfW + percentHalfW + pad);
-
-            const needsAvoid = nearSameY && overlapX;
-            const hasRoomToShiftX = loopW >= (nameHalfW + percentHalfW + pad) * 2 + 8;
-
-            if (needsAvoid) {
-              // Keep X centered; avoid overlap by moving in Y inside the loop.
-              // Node title is above the node; overlap tends to happen with TOP self-loops.
-              // Use a small forbidden band around the nodeLabel baseline, then pick a Y outside it.
-              const textH = 10;
-              const padY = 4;
-              const forbidMin = nodeLabelY - textH / 2 - padY;
-              const forbidMax = nodeLabelY + textH / 2 + padY;
-
-              if (yMid >= forbidMin && yMid <= forbidMax) {
-                if (d.circularLinkType === "top") {
-                  // Move upward inside the loop (smaller Y)
-                  yMid = forbidMin - (textH / 2);
-                } else {
-                  // Bottom loop: move downward (larger Y)
-                  yMid = forbidMax + (textH / 2);
-                }
-              }
-
-              // Clamp within loop vertical bounds.
-              const vMin = Math.min(sourceY, vfe) + 6;
-              const vMax = Math.max(sourceY, vfe) - 6;
-              yMid = Math.min(vMax, Math.max(vMin, yMid));
-            }
-
-            return yMid;
+            return _selfLoopLabelAnchorY(d);
         }
         return 0;
       })
@@ -2431,6 +2457,10 @@ class SankeyChart {
     
     node
       .on("mouseenter", function(event, d) {
+        if (pendingLabelResetTimer != null) {
+          try { clearTimeout(pendingLabelResetTimer); } catch (e) { /* ignore */ }
+          pendingLabelResetTimer = null;
+        }
         const dimOpacity = 0.1;
         
         // Find all links connected to this node (using Set of indices for reliable comparison)
@@ -2529,15 +2559,7 @@ class SankeyChart {
           
         // Hide all labels
         linkLabels.style("opacity", 0);
-
-        // Restore default (link-hover) text rules
-        linkLabels.select(".link-label-source").text(l => _linkLabelText(l, "source", "link"));
-        linkLabels.select(".link-label-target").text(l => _linkLabelText(l, "target", "link"));
-        linkLabels.select(".link-label-self").text(l => _linkLabelText(l, "self", "link"));
-
-        // Reset any hover-time Y overrides
-        linkLabels.select(".link-label-source").attr("y", l => _linkLabelAnchorY(l, "source", "below"));
-        linkLabels.select(".link-label-target").attr("y", l => _linkLabelAnchorY(l, "target", "below"));
+        scheduleLabelResetAfterFade();
       });
 
     var link = linkG.data(linksForDraw).enter().append("g");
