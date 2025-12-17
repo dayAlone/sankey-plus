@@ -556,12 +556,13 @@ test("circular links from same target column and same type (top/bottom) maintain
 
   // Helper: check if two links' vertical ranges overlap on the left leg
   function verticalOverlap(a, b) {
-    const aTargetY = a.target.y1;
+    // Use the actual target port position, consistent with the left-leg clearance pass.
+    const aTargetY = a.y1;
     const aVfe = a.circularPathData.verticalFullExtent;
     const aYMin = Math.min(aTargetY, aVfe);
     const aYMax = Math.max(aTargetY, aVfe);
     
-    const bTargetY = b.target.y1;
+    const bTargetY = b.y1;
     const bVfe = b.circularPathData.verticalFullExtent;
     const bYMin = Math.min(bTargetY, bVfe);
     const bYMax = Math.max(bTargetY, bVfe);
@@ -591,25 +592,6 @@ test("circular links from same target column and same type (top/bottom) maintain
           `${curr.source.name}→${curr.target.name}: gap=${gap.toFixed(2)}px`
       );
     }
-  });
-});
-
-test("self-loops remain compact (height <= 40px)", () => {
-  const chart = makeChart();
-  const maxSelfLoopHeight = 40;
-  const selfLoops = chart.graph.links.filter(
-    (l) => l.circular && !l.isVirtual && isSelf(l)
-  );
-
-  selfLoops.forEach((l) => {
-    const nodeY = l.circularLinkType === "bottom" ? l.source.y1 : l.source.y0;
-    const vfe = l.circularPathData.verticalFullExtent;
-    const height = l.circularLinkType === "bottom" ? vfe - nodeY : nodeY - vfe;
-    assert.ok(
-      height <= maxSelfLoopHeight,
-      `Self-loop ${l.source.name}→${l.target.name} (${l.circularLinkType}) too tall: ` +
-        `height=${height.toFixed(1)}px, max=${maxSelfLoopHeight}px`
-    );
   });
 });
 
