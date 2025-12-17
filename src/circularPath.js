@@ -454,6 +454,9 @@ export function addCircularPathData(
       ) {
         c.rightSmallArcRadius = c.rightLargeArcRadius;
       }
+      // Keep extents consistent after radius scaling (clearance pass sorts by rightFullExtent).
+      c.rightFullExtent =
+        (c.sourceX || 0) + (c.rightLargeArcRadius || 0) + (c.rightNodeBuffer || 0);
     });
   });
 
@@ -461,9 +464,9 @@ export function addCircularPathData(
   //
   // Right leg clearance: ensure minimum horizontal gap between ALL circular links
   // from the same source column that have overlapping vertical ranges.
-  // This handles both same-type (TOP-TOP, BOTTOM-BOTTOM) and cross-type (TOP-BOTTOM) overlaps.
+  // Note: we keep TOP and BOTTOM in separate groups to avoid unnecessary cross-band pushing.
   //
-  // We group by source column only and check vertical overlap before applying clearance.
+  // We group by source column + band and check vertical overlap before applying clearance.
   var rightGroups = {};
   graph.links.forEach(function(l) {
     if (!l.circular) return;
@@ -473,20 +476,36 @@ export function addCircularPathData(
       l.source && typeof l.source.column === "number"
         ? String(l.source.column)
         : String(Math.round((l.circularPathData.sourceX || 0) * 10) / 10);
-    if (!rightGroups[sourceKey]) rightGroups[sourceKey] = [];
-    rightGroups[sourceKey].push(l);
+    var key = sourceKey + "|" + String(l.circularLinkType);
+    if (!rightGroups[key]) rightGroups[key] = [];
+    rightGroups[key].push(l);
   });
 
   Object.keys(rightGroups).forEach(function(k) {
     var group = rightGroups[k];
     if (group.length < 2) return;
     
+    // Freeze a stable inner->outer order before we start pushing radii.
+    // This prevents a pushed link from reordering and causing cascade dispersion.
+    group.forEach(function(l) {
+      var c = l.circularPathData;
+      if (!c) return;
+      if (typeof c._rightFullExtentBase !== "number") c._rightFullExtentBase = c.rightFullExtent;
+    });
+
     var maxRightIters = 20;
     for (var rightIt = 0; rightIt < maxRightIters; rightIt++) {
       var rightChanged = false;
       // Sort by rightFullExtent: inner first (smaller rfe)
       group.sort(function(a, b) {
-        return a.circularPathData.rightFullExtent - b.circularPathData.rightFullExtent;
+        var ab = a.circularPathData._rightFullExtentBase;
+        var bb = b.circularPathData._rightFullExtentBase;
+        if (ab !== bb) return ab - bb;
+        // Current rfe as tie-break (keeps determinism if bases tie)
+        var ar = a.circularPathData.rightFullExtent;
+        var br = b.circularPathData.rightFullExtent;
+        if (ar !== br) return ar - br;
+        return (a.circularLinkID || 0) - (b.circularLinkID || 0);
       });
 
       for (var i = 1; i < group.length; i++) {
@@ -952,6 +971,40 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap, graph, verticalMa
   // - thin links becoming outermost and entering a node from above.
   Object.values(groups).forEach(function(group) {
     group.sort(function(a, b) {
+      // For BOTTOM BACKLINKS that land in the same target column with the same span,
+      // we want the *arc depth* (verticalBuffer/verticalFullExtent) to be inverted relative to
+      // target vertical order:
+      // - lower targets should curl LESS deep (stay closer to the node)
+      // - higher targets should curl MORE deep (go more outer/deeper)
+      //
+      // Depth is primarily driven by processing order: earlier links get smaller verticalBuffer.
+      // So we process LOWER targets first (DESC) in this specific tie-case.
+      var aIsBottomBacklinkForDepth =
+        a.circularLinkType === "bottom" && (a.target.column || 0) < (a.source.column || 0);
+      var bIsBottomBacklinkForDepth =
+        b.circularLinkType === "bottom" && (b.target.column || 0) < (b.source.column || 0);
+      if (aIsBottomBacklinkForDepth && bIsBottomBacklinkForDepth) {
+        var aDistDepth = Math.abs(a.source.column - a.target.column);
+        var bDistDepth = Math.abs(b.source.column - b.target.column);
+        var sameSpanDepth = (aDistDepth === bDistDepth);
+        var sameTargetColDepth = (a.target.column === b.target.column);
+        var sameSourceColDepth = (a.source.column === b.source.column);
+        if (sameSpanDepth && sameTargetColDepth && sameSourceColDepth) {
+          var aTgtCYDepth =
+            a.target && typeof a.target.y0 === "number" && typeof a.target.y1 === "number"
+              ? (a.target.y0 + a.target.y1) / 2
+              : 0;
+          var bTgtCYDepth =
+            b.target && typeof b.target.y0 === "number" && typeof b.target.y1 === "number"
+              ? (b.target.y0 + b.target.y1) / 2
+              : 0;
+          if (Math.abs(aTgtCYDepth - bTgtCYDepth) >= 1e-6) {
+            // DESC: lower targets first (shallower), higher targets later (deeper)
+            return bTgtCYDepth - aTgtCYDepth;
+          }
+        }
+      }
+
       // Keep links targeting the same node together (prevents alternating/braiding between
       // multiple target nodes in the same column).
       //

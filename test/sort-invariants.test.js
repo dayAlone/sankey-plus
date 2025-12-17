@@ -309,11 +309,14 @@ test("top span=1 search_loop stays aligned with its target-column bundle baselin
     Math.abs(baselineMinY - c.groupMinY) < 1e-3,
     `Expected TOP span=1 search_loop to use groupMinY baseline: baselineMinY=${baselineMinY.toFixed(2)} groupMinY=${c.groupMinY.toFixed(2)}`
   );
-  // And it should NOT be using per-link extMinY baseline in this bundle.
-  assert.ok(
-    Math.abs(baselineMinY - c._extMinY) > 1e-3,
-    `Expected TOP span=1 search_loop NOT to use _extMinY baseline: baselineMinY=${baselineMinY.toFixed(2)} extMinY=${c._extMinY.toFixed(2)}`
-  );
+  // NOTE: In some fixtures the group's minimum Y can coincide with this link's own extMinY.
+  // The invariant we care about is baselineMinY === groupMinY; we do NOT require it to differ from _extMinY.
+  if (Math.abs(c.groupMinY - c._extMinY) > 1e-3) {
+    assert.ok(
+      Math.abs(baselineMinY - c._extMinY) > 1e-3,
+      `Expected TOP span=1 search_loop NOT to use _extMinY baseline when groupMinY differs: baselineMinY=${baselineMinY.toFixed(2)} extMinY=${c._extMinY.toFixed(2)} groupMinY=${c.groupMinY.toFixed(2)}`
+    );
+  }
 });
 
 test("top backlinks are grouped by target: no interleaving between search ○ and search ◐ bundles", () => {

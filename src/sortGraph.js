@@ -306,6 +306,29 @@ export function sortSourceLinks(inputGraph, id, typeOrder, typeAccessor) {
             return d1 - d2;
           }
 
+          // When span ties, always prefer ordering by target vertical position BEFORE thickness.
+          //
+          // This keeps ports stable and intuitive:
+          // - TOP band assigns ports top->bottom => higher targets should take higher ports => targetCY ASC
+          // - BOTTOM band assigns ports bottom->top => lower targets should take lower ports => targetCY DESC
+          //
+          // For BACKLINKS specifically this is critical; but applying it to all circular links
+          // avoids cases where `width` overrides a clear vertical ordering.
+          var link1TargetCY =
+            link1.target && typeof link1.target.y0 === "number" && typeof link1.target.y1 === "number"
+              ? (link1.target.y0 + link1.target.y1) / 2
+              : 0;
+          var link2TargetCY =
+            link2.target && typeof link2.target.y0 === "number" && typeof link2.target.y1 === "number"
+              ? (link2.target.y0 + link2.target.y1) / 2
+              : 0;
+          if (Math.abs(link1TargetCY - link2TargetCY) >= 1e-6) {
+            if (link1.circularLinkType === "bottom") {
+              return link2TargetCY - link1TargetCY; // DESC
+            }
+            return link1TargetCY - link2TargetCY; // ASC
+          }
+
           var w1 = link1.width || 0;
           var w2 = link2.width || 0;
           if (w1 !== w2) {
@@ -316,12 +339,6 @@ export function sortSourceLinks(inputGraph, id, typeOrder, typeAccessor) {
             return w1 - w2;
           }
 
-          var t1 = (link1.target.y0 + link1.target.y1) / 2;
-          var t2 = (link2.target.y0 + link2.target.y1) / 2;
-          // IMPORTANT: bottom-band ports are assigned from bottom -> top (see ySourceBottom loop),
-          // so to keep links from "braiding" near the node we must reverse the vertical ordering
-          // for bottom circular links (lower targets first, higher targets last).
-          if (t1 !== t2) return (link1.circularLinkType === "bottom") ? (t2 - t1) : (t1 - t2);
           return (link1.index || 0) - (link2.index || 0);
         }
       });
