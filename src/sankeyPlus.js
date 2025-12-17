@@ -2385,6 +2385,45 @@ class SankeyChart {
       return d.name;
     });
 
+    // Copy node name on click.
+    // Attach to the group so clicking rect/text both work.
+    node.on("click", function(event, d) {
+      try {
+        if (event && typeof event.stopPropagation === "function") event.stopPropagation();
+      } catch (e) {
+        // ignore
+      }
+      const text = d && typeof d.name === "string" ? d.name : String(d?.name ?? "");
+
+      const writeWithFallback = (t) => {
+        if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+          return navigator.clipboard.writeText(t);
+        }
+        return new Promise((resolve, reject) => {
+          try {
+            if (typeof document === "undefined") return reject(new Error("No document available"));
+            const ta = document.createElement("textarea");
+            ta.value = t;
+            ta.setAttribute("readonly", "");
+            ta.style.position = "fixed";
+            ta.style.opacity = "0";
+            ta.style.left = "-9999px";
+            ta.style.top = "0";
+            document.body.appendChild(ta);
+            ta.select();
+            const ok = document.execCommand && document.execCommand("copy");
+            document.body.removeChild(ta);
+            if (ok) resolve();
+            else reject(new Error("execCommand(copy) failed"));
+          } catch (e) {
+            reject(e);
+          }
+        });
+      };
+
+      writeWithFallback(text).catch(() => {});
+    });
+
     // Node hover handlers
     const graphLinks = this.graph.links;
     const nodeOpacity = this.config.nodes.opacity;
@@ -2539,6 +2578,55 @@ class SankeyChart {
       .style("stroke", getLinkColor)
       .style("cursor", "pointer")
       .style("transition", "stroke-opacity 0.3s ease")
+      .on("click", function(event, d) {
+        // Copy "{source.name} → {target.name}" to clipboard on click.
+        // Use Clipboard API when available; fall back to a hidden textarea otherwise.
+        try {
+          if (event && typeof event.stopPropagation === "function") event.stopPropagation();
+        } catch (e) {
+          // ignore
+        }
+
+        const nameOf = (n) => {
+          if (n == null) return "";
+          if (typeof n === "string") return n;
+          if (typeof n.name === "string") return n.name;
+          return String(n.name ?? n.index ?? "");
+        };
+        const src = nameOf(d && d.source);
+        const tgt = nameOf(d && d.target);
+        const text = `${src} → ${tgt}`;
+
+        const writeWithFallback = (t) => {
+          if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+            return navigator.clipboard.writeText(t);
+          }
+
+          return new Promise((resolve, reject) => {
+            try {
+              if (typeof document === "undefined") return reject(new Error("No document available"));
+              const ta = document.createElement("textarea");
+              ta.value = t;
+              ta.setAttribute("readonly", "");
+              ta.style.position = "fixed";
+              ta.style.opacity = "0";
+              ta.style.left = "-9999px";
+              ta.style.top = "0";
+              document.body.appendChild(ta);
+              ta.select();
+              const ok = document.execCommand && document.execCommand("copy");
+              document.body.removeChild(ta);
+              if (ok) resolve();
+              else reject(new Error("execCommand(copy) failed"));
+            } catch (e) {
+              reject(e);
+            }
+          });
+        };
+
+        // Fire and forget; avoid breaking hover interactions.
+        writeWithFallback(text).catch(() => {});
+      })
       .on("mouseenter", function(event, d) {
         // Ensure link-hover rules are active (in case we last hovered a node).
         linkLabels.select(".link-label-source").text(l => _linkLabelText(l, "source", "link"));

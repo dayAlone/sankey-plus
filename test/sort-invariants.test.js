@@ -249,9 +249,10 @@ test("top span=1 search_loop stays aligned with its target-column bundle baselin
     align: "left",
     id: (d) => d.name,
     iterations: 10,
+    scale: 0.3,
     padding: 25,
     width: 1200,
-    height: 900,
+    height: 600,
     nodes: {
       data: fullNodes.map((n) => ({ ...n })),
       width: 15,
@@ -361,9 +362,10 @@ test("top circular links into the same target node maintain minimum gap (saved_f
     align: "left",
     id: (d) => d.name,
     iterations: 10,
+    scale: 0.3,
     padding: 25,
     width: 1200,
-    height: 900,
+    height: 600,
     nodes: {
       data: fullNodes.map((n) => ({ ...n })),
       width: 15,
@@ -703,4 +705,177 @@ test("top group ordering: backlinks to schedule ○ stay below listing ○ / fil
     `Expected sosisa ◐ → schedule ○ to be below listing/filter bundles: ` +
       `vfe=${s2.circularPathData.verticalFullExtent.toFixed(2)} vs ref=${ref.toFixed(2)}`
   );
+});
+
+test("top height ordering: schedule ●→filter should not rise above the saved_filters_search ● bundle anchor (schedule ○→saved_filters_search ●)", () => {
+  // Use FULL fixture so circular classification matches the reported DOM case.
+  const debugHtml = fs.readFileSync(path.join(__dirname, "..", "test-debug.html"), "utf8");
+  const nodesMatch = debugHtml.match(/\b(?:let|const)\s+nodes\s*=\s*(\[[\s\S]*?\]);/);
+  const linksMatch = debugHtml.match(/\b(?:let|const)\s+links\s*=\s*(\[[\s\S]*?\]);/);
+  assert.ok(nodesMatch, "Failed to parse nodes from test-debug.html");
+  assert.ok(linksMatch, "Failed to parse links from test-debug.html");
+  // eslint-disable-next-line no-new-func
+  const fullNodes = Function(`"use strict"; return (${nodesMatch[1]});`)();
+  // eslint-disable-next-line no-new-func
+  const fullLinks = Function(`"use strict"; return (${linksMatch[1]});`)();
+  const chart = new SankeyChart({
+    align: "left",
+    id: (d) => d.name,
+    iterations: 10,
+    scale: 0.3,
+    padding: 25,
+    width: 1200,
+    height: 600,
+    nodes: {
+      data: fullNodes.map((n) => ({ ...n })),
+      width: 15,
+      padding: 25,
+      minPadding: 30,
+      virtualPadding: 7,
+      horizontalSort: true,
+      verticalSort: true,
+      setPositions: false,
+      fill: () => "#ccc",
+    },
+    links: {
+      data: fullLinks.map((l) => ({ ...l })),
+      circularGap: 1,
+      circularLinkPortionTopBottom: 0.4,
+      circularLinkPortionLeftRight: 0.1,
+      useVirtualRoutes: true,
+      baseRadius: 5,
+      verticalMargin: 20,
+      horizontalMargin: 100,
+      opacity: 0.7,
+      virtualLinkType: "bezier",
+      color: "lightgrey",
+      sortIterations: 12,
+      postSortIterations: 4,
+      typeOrder: ["booking", "search_loop", "primary", "secondary", "search_nearby"],
+      typeAccessor: (d) => d.type,
+      types: {},
+    },
+    arrows: { enabled: false },
+  });
+  chart.process();
+  const a = chart.graph.links.find(
+    (l) =>
+      l.circular &&
+      !l.isVirtual &&
+      l.circularLinkType === "top" &&
+      l.source?.name === "schedule ●" &&
+      l.target?.name === "filter"
+  );
+  const b = chart.graph.links.find(
+    (l) =>
+      l.circular &&
+      !l.isVirtual &&
+      l.circularLinkType === "top" &&
+      l.source?.name === "schedule ○" &&
+      l.target?.name === "saved_filters_search ●"
+  );
+  assert.ok(a, "Missing TOP link schedule ● → filter");
+  assert.ok(b, "Missing TOP link schedule ○ → saved_filters_search ●");
+  const vfeA = a.circularPathData?.verticalFullExtent;
+  const vfeB = b.circularPathData?.verticalFullExtent;
+  assert.ok(Number.isFinite(vfeA) && Number.isFinite(vfeB), "Expected verticalFullExtent for both links");
+  // TOP: smaller VFE means higher/outer. We want schedule→filter to be NOT higher than the saved_filters anchor.
+  assert.ok(
+    vfeA >= vfeB - 1e-6,
+    `Expected schedule ●→filter to be below/at schedule ○→saved_filters_search ●: vfe(filter)=${vfeA.toFixed(
+      2
+    )} vs vfe(saved_anchor)=${vfeB.toFixed(2)}`
+  );
+});
+
+test("top min-gap (cross-target): filter→saved_filters_search ● and schedule ○→listing ○ keep >= circularGap when their top bands overlap", () => {
+  // Full fixture to match the visual case.
+  const debugHtml = fs.readFileSync(path.join(__dirname, "..", "test-debug.html"), "utf8");
+  const nodesMatch = debugHtml.match(/\b(?:let|const)\s+nodes\s*=\s*(\[[\s\S]*?\]);/);
+  const linksMatch = debugHtml.match(/\b(?:let|const)\s+links\s*=\s*(\[[\s\S]*?\]);/);
+  assert.ok(nodesMatch, "Failed to parse nodes from test-debug.html");
+  assert.ok(linksMatch, "Failed to parse links from test-debug.html");
+  // eslint-disable-next-line no-new-func
+  const fullNodes = Function(`"use strict"; return (${nodesMatch[1]});`)();
+  // eslint-disable-next-line no-new-func
+  const fullLinks = Function(`"use strict"; return (${linksMatch[1]});`)();
+
+  const chart = new SankeyChart({
+    align: "left",
+    id: (d) => d.name,
+    iterations: 10,
+    scale: 0.3,
+    padding: 25,
+    width: 1200,
+    height: 600,
+    nodes: {
+      data: fullNodes.map((n) => ({ ...n })),
+      width: 15,
+      padding: 25,
+      minPadding: 30,
+      virtualPadding: 7,
+      horizontalSort: true,
+      verticalSort: true,
+      setPositions: false,
+      fill: () => "#ccc",
+    },
+    links: {
+      data: fullLinks.map((l) => ({ ...l })),
+      circularGap: 1,
+      circularLinkPortionTopBottom: 0.4,
+      circularLinkPortionLeftRight: 0.1,
+      useVirtualRoutes: true,
+      baseRadius: 5,
+      verticalMargin: 20,
+      horizontalMargin: 100,
+      opacity: 0.7,
+      virtualLinkType: "bezier",
+      color: "lightgrey",
+      sortIterations: 12,
+      postSortIterations: 4,
+      typeOrder: ["booking", "search_loop", "primary", "secondary", "search_nearby"],
+      typeAccessor: (d) => d.type,
+      types: {},
+    },
+    arrows: { enabled: false },
+  });
+  chart.process();
+
+  const a = chart.graph.links.find(
+    (l) =>
+      l.circular &&
+      !l.isVirtual &&
+      l.circularLinkType === "top" &&
+      l.source?.name === "filter" &&
+      l.target?.name === "saved_filters_search ●"
+  );
+  const b = chart.graph.links.find(
+    (l) =>
+      l.circular &&
+      !l.isVirtual &&
+      l.circularLinkType === "top" &&
+      l.source?.name === "schedule ○" &&
+      l.target?.name === "listing ○"
+  );
+  assert.ok(a, "Missing TOP link filter → saved_filters_search ●");
+  assert.ok(b, "Missing TOP link schedule ○ → listing ○");
+
+  const ca = a.circularPathData;
+  const cb = b.circularPathData;
+  assert.ok(ca && cb, "Missing circularPathData");
+
+  const aL = Math.min(ca.leftInnerExtent, ca.rightInnerExtent);
+  const aR = Math.max(ca.leftInnerExtent, ca.rightInnerExtent);
+  const bL = Math.min(cb.leftInnerExtent, cb.rightInnerExtent);
+  const bR = Math.max(cb.leftInnerExtent, cb.rightInnerExtent);
+  const xOverlap = Math.min(aR, bR) - Math.max(aL, bL);
+  assert.ok(xOverlap > 1e-6, `Expected top-band X overlap, got ${xOverlap}`);
+
+  // TOP: higher VFE = inner (closer to nodes). Outer must sit >= circularGap above it.
+  const inner = ca.verticalFullExtent >= cb.verticalFullExtent ? a : b;
+  const outer = inner === a ? b : a;
+  const innerTopEdge = inner.circularPathData.verticalFullExtent - (inner.width || 0) / 2;
+  const outerBottomEdge = outer.circularPathData.verticalFullExtent + (outer.width || 0) / 2;
+  const gapNow = innerTopEdge - outerBottomEdge;
+  assert.ok(gapNow >= 1 - 1e-6, `Expected gap>=1, got ${gapNow.toFixed(3)}`);
 });

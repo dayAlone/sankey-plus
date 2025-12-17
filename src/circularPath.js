@@ -193,8 +193,10 @@ export function addCircularPathData(
         // in the same column and can shrink enough that multiple thick links end up with near-identical
         // left vertical-leg X positions => visible overlap at node entry.
         thisColumn = link.target.column;
-        var isBacklinkForThis =
-          link.circularLinkType === "bottom" && (link.target.column || 0) < (link.source.column || 0);
+        // Backlinks (target is left of source) must group by TARGET NODE on the left side,
+        // for both TOP and BOTTOM bands. Otherwise, links into different nodes in the same
+        // target column share radius spacing and can braid/intersect near node entry.
+        var isBacklinkForThis = (link.target.column || 0) < (link.source.column || 0);
         sameColumnLinks = graph.links.filter(function (l) {
           if (!(l && l.circular && l.circularLinkType == thisCircularLinkType)) return false;
           if (isBacklinkForThis) {
@@ -329,13 +331,44 @@ export function addCircularPathData(
         var linkSpan = Math.abs((link.source.column || 0) - (link.target.column || 0));
         // For short-span links (≤2 columns), use smaller baseOffset to keep them compact.
         // For longer backlinks, allow more vertical escape to avoid crossing horizontal flow.
-        var spanFactor = linkSpan <= 1 ? 0.04 : (linkSpan === 2 ? 0.06 : 0.08);
+        // For TOP links, make baseOffset much less dependent on span so that "bundle grouping by target"
+        // dominates over span-based escape. Otherwise a longer-span link into a *lower* target (e.g. `filter`)
+        // can rise above the bundle into a *higher* target (e.g. `saved_filters_search`), visually breaking it.
+        var spanFactor =
+          (link.circularLinkType === "top")
+            ? 0.045
+            : (linkSpan <= 1 ? 0.04 : (linkSpan === 2 ? 0.06 : 0.08));
         var desiredBaseOffset = Math.max(verticalMargin + link.width + 2, columnHeight * spanFactor);
         
         // Tight cap (~3% of diagram height for short, ~4.5% for long) to keep arcs close to nodes.
         var capFactor = linkSpan <= 2 ? 0.03 : 0.045;
         var maxAllowedBaseOffset = Math.max(verticalMargin, (graph.y1 - graph.y0) * capFactor);
+        var isBacklink = (link.source.column || 0) > (link.target.column || 0);
+        // Small-span TOP backlinks can be overly clamped, making them sit too low and intersect other TOP arcs.
+        // Allow a tiny extra escape, but never exceed the "long-link" cap.
+        if (isBacklink && link.circularLinkType === "top" && linkSpan <= 2) {
+          var longCap = Math.max(verticalMargin, (graph.y1 - graph.y0) * 0.045);
+          maxAllowedBaseOffset = Math.min(maxAllowedBaseOffset + 4, longCap);
+        }
         var baseOffset = Math.min(desiredBaseOffset, maxAllowedBaseOffset);
+        // TOP links: prefer arcs into higher targets to be slightly more "outer" (escape higher),
+        // so their bundles sit above arcs into lower targets. Keep this tweak small & capped to
+        // avoid spreading right arcs across the whole graph.
+        if (
+          link.circularLinkType === "top" &&
+          link.target &&
+          typeof link.target.y0 === "number" &&
+          typeof link.target.y1 === "number" &&
+          typeof graph.y0 === "number" &&
+          typeof graph.y1 === "number"
+        ) {
+          var tCY = (link.target.y0 + link.target.y1) / 2;
+          var h = (graph.y1 - graph.y0) || 1;
+          // higher target => larger norm => slightly bigger baseOffset
+          var norm = (graph.y1 - tCY) / h;
+          var extraTop = Math.max(0, Math.min(4, 4 * norm));
+          baseOffset = Math.min(baseOffset + extraTop, maxAllowedBaseOffset);
+        }
         link.circularPathData.baseOffset = baseOffset;
         // IMPORTANT: do NOT force all links in a bundle to share the same verticalBuffer.
         // That makes them collapse onto one horizontal line (same verticalFullExtent).
@@ -540,6 +573,16 @@ export function addCircularPathData(
         var currLeft = curr.circularPathData.rightFullExtent - currW / 2;
         var gap = currLeft - prevRight;
         var required = circularLinkGap || 0;
+        // The LEFT-leg clearance check is based on the vertical leg's X positions, but the actual
+        // quarter-arc into the node can still come closer than that (especially for TOP links).
+        // Add a small capped margin for TOP to avoid visible overlaps between neighboring bundles.
+        if (group.length && group[0].circularLinkType === "top") {
+          // Scales mildly with arc size but stays bounded.
+          var aR = prev.circularPathData.leftLargeArcRadius || 0;
+          var bR = curr.circularPathData.leftLargeArcRadius || 0;
+          var extra = Math.min(2, Math.max(0.75, 0.05 * Math.max(aR, bR)));
+          required += extra;
+        }
         
         if (gap < required) {
           var delta = required - gap + 1e-6;
@@ -587,8 +630,18 @@ export function addCircularPathData(
     var maxLeftIters = 20;
     for (var leftIt = 0; leftIt < maxLeftIters; leftIt++) {
       var leftChanged = false;
-      // Sort by leftFullExtent: outer first (smaller value = more to the left)
+      // Sort by vertical band position first so "outer" matches the visual nesting:
+      // - TOP: outer is higher (smaller verticalFullExtent)
+      // - BOTTOM: outer is lower (larger verticalFullExtent)
+      // Then fall back to leftFullExtent (more left = smaller).
       group.sort(function(a, b) {
+        var av = a.circularPathData.verticalFullExtent;
+        var bv = b.circularPathData.verticalFullExtent;
+        if (group.length && group[0].circularLinkType === "top") {
+          if (av !== bv) return av - bv; // outer first
+        } else {
+          if (av !== bv) return bv - av; // outer first for bottom
+        }
         var al = a.circularPathData.leftFullExtent;
         var bl = b.circularPathData.leftFullExtent;
         if (al !== bl) return al - bl;
@@ -845,19 +898,43 @@ export function addCircularPathData(
       topCircular.sort(function(a, b) {
         return b.circularPathData.verticalFullExtent - a.circularPathData.verticalFullExtent;
       });
-      for (var ti = 1; ti < topCircular.length; ti++) {
-        var prevT = topCircular[ti - 1]; // higher VFE = closer to nodes
-        var currT = topCircular[ti];     // lower VFE = further from nodes (higher visually)
-        // Only enforce a gap when these two links can actually overlap/cross.
-        if (!circularLinksActuallyCross(prevT, currT)) continue;
-        // prev is "inner" (closer to nodes), curr is "outer" (further up)
-        var prevTopEdge = prevT.circularPathData.verticalFullExtent - (prevT.width || 0) / 2;
-        var currBottomEdge = currT.circularPathData.verticalFullExtent + (currT.width || 0) / 2;
-        var gapTop = prevTopEdge - currBottomEdge;
-        if (gapTop < minTopGap) {
-          var pushTop = (minTopGap - gapTop) + 1e-6;
-          // Push curr UP = decrease its VFE
-          currT.circularPathData.verticalFullExtent -= pushTop;
+      for (var ti = 0; ti < topCircular.length; ti++) {
+        var currT = topCircular[ti]; // current link (closer-to-node earlier, outer later)
+        var currW = currT.width || 0;
+        var currVfe = currT.circularPathData.verticalFullExtent;
+        var targetVfe = currVfe;
+
+        // Compute curr's top-band X range once.
+        var cL = Math.min(currT.circularPathData.leftInnerExtent, currT.circularPathData.rightInnerExtent);
+        var cR = Math.max(currT.circularPathData.leftInnerExtent, currT.circularPathData.rightInnerExtent);
+
+        // Ensure a minimum gap to *all* earlier (inner) links that overlap in the top-band region.
+        for (var pj = 0; pj < ti; pj++) {
+          var prevT = topCircular[pj];
+          var prevW = prevT.width || 0;
+
+          // Overlap criteria:
+          // - strict crossing, OR
+          // - overlapping X ranges on the top horizontal band (inner extents overlap)
+          var overlaps = circularLinksActuallyCross(prevT, currT);
+          if (!overlaps) {
+            var pL = Math.min(prevT.circularPathData.leftInnerExtent, prevT.circularPathData.rightInnerExtent);
+            var pR = Math.max(prevT.circularPathData.leftInnerExtent, prevT.circularPathData.rightInnerExtent);
+            var xOverlap = Math.min(pR, cR) - Math.max(pL, cL);
+            overlaps = xOverlap > 1e-6;
+          }
+          if (!overlaps) continue;
+
+          var prevTopEdge = prevT.circularPathData.verticalFullExtent - prevW / 2;
+          // Need: (prevTopEdge) - (currVfe + currW/2) >= minTopGap
+          var allowedCurrVfe = prevTopEdge - minTopGap - currW / 2;
+          if (targetVfe > allowedCurrVfe) targetVfe = allowedCurrVfe;
+        }
+
+        if (targetVfe < currVfe - 1e-12) {
+          // Push curr UP = decrease its VFE (add epsilon to avoid float equality issues)
+          var pushTop = (currVfe - targetVfe) + 1e-6;
+          currT.circularPathData.verticalFullExtent = currVfe - pushTop;
           if (typeof currT.circularPathData.verticalBuffer === "number") {
             currT.circularPathData.verticalBuffer += pushTop;
           }
@@ -1159,6 +1236,11 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap, graph, verticalMa
     var desiredBaseOffset = Math.max(vMargin + link.width + 2, columnHeight * spanFactor);
     var capFactor = linkSpan <= 2 ? 0.03 : 0.045;
     var maxAllowedBaseOffset = Math.max(vMargin, diagramHeight * capFactor);
+    var isBacklink = (link.source.column || 0) > (link.target.column || 0);
+    if (isBacklink && link.circularLinkType === "top" && linkSpan <= 2) {
+      var longCap = Math.max(vMargin, diagramHeight * 0.045);
+      maxAllowedBaseOffset = Math.min(maxAllowedBaseOffset + 4, longCap);
+    }
     link.circularPathData._baseOffsetForBuffer = Math.min(desiredBaseOffset, maxAllowedBaseOffset);
   });
 
@@ -1316,7 +1398,7 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap, graph, verticalMa
           // Only include baseOffset in the correction for BOTTOM links.
           // For TOP links, span-dependent baseOffset also encodes "how far up we escape",
           // and compensating it here can invert the desired nesting order (span monotonicity),
-          // increasing crossings. Bottom bundles are the reported source of holes.
+          // increasing crossings.
           var thisBaseOffset =
             (link.circularLinkType === "bottom" &&
               link.circularPathData &&
