@@ -1652,6 +1652,9 @@ class SankeyChart {
         padding: 25,
         minPadding: 25,
         virtualPadding: 7,
+        // If set to "scale", scale up ky (node/link thickness) to better use available height.
+        // This helps when capped gap spacing would otherwise leave large top/bottom margins.
+        fillHeight: "none",
         horizontalSort: null,
         verticalSort: null,
         // How much circular links influence vertical relaxation.
@@ -1706,6 +1709,90 @@ class SankeyChart {
   }
 
   process() {
+    const circularPortGapPx = Math.max(
+      0,
+      Math.min(2, Number(this.config.links.circularGap) || 0)
+    );
+    // Debug helper: capture backlink order into a specific node across sorting stages.
+    // Enable via URL: `?debugBacklinks=1&debugNode=search%20○`
+    let _dbgBacklinks = false;
+    let _dbgNodeName = "search ○";
+    try {
+      if (typeof window !== "undefined" && window.location && window.location.search) {
+        const sp = new URLSearchParams(window.location.search);
+        _dbgBacklinks = sp.get("debugBacklinks") === "1";
+        _dbgNodeName = sp.get("debugNode") || _dbgNodeName;
+      }
+    } catch (e) {
+      // ignore
+    }
+    const _captureBacklinkStage = (stage) => {
+      if (!_dbgBacklinks) return;
+      try {
+        const g = this.graph;
+        if (!g || !Array.isArray(g.links) || !Array.isArray(g.nodes)) return;
+
+        const targetNode = g.nodes.find((n) => n && n.name === _dbgNodeName);
+        const targetCol =
+          targetNode && typeof targetNode.column === "number" ? targetNode.column : null;
+
+        // User-defined backlink: source column is to the RIGHT of target column.
+        const raw = g.links.filter((l) => {
+          if (!l || !l.source || !l.target) return false;
+          if (l.target.name !== _dbgNodeName) return false;
+          if (typeof l.source.column !== "number" || typeof l.target.column !== "number")
+            return false;
+          return l.source.column > l.target.column;
+        });
+
+        // Visual order at the target: top->bottom by y1 (when assigned).
+        const backlinks = raw
+          .slice()
+          .sort((a, b) => {
+            const ay = typeof a.y1 === "number" ? a.y1 : Number.NEGATIVE_INFINITY;
+            const by = typeof b.y1 === "number" ? b.y1 : Number.NEGATIVE_INFINITY;
+            if (ay !== by) return ay - by;
+            const as =
+              a.source && typeof a.source.y0 === "number" && typeof a.source.y1 === "number"
+                ? (a.source.y0 + a.source.y1) / 2
+                : 0;
+            const bs =
+              b.source && typeof b.source.y0 === "number" && typeof b.source.y1 === "number"
+                ? (b.source.y0 + b.source.y1) / 2
+                : 0;
+            if (as !== bs) return as - bs;
+            return (a.index || 0) - (b.index || 0);
+          })
+          .map((l) => ({
+            index: l.index,
+            source: l.source && l.source.name,
+            target: l.target && l.target.name,
+            sourceCol: l.source && l.source.column,
+            targetCol: l.target && l.target.column,
+            circular: !!l.circular,
+            circularLinkType: l.circularLinkType,
+            linkType: l.linkType,
+            type: l.type,
+            value: l.value,
+            width: l.width,
+            y0: l.y0,
+            y1: l.y1,
+          }));
+
+        if (!this._debugBacklinkStages) this._debugBacklinkStages = [];
+        this._debugBacklinkStages.push({
+          stage,
+          target: _dbgNodeName,
+          targetCol,
+          nodeY0: targetNode && typeof targetNode.y0 === "number" ? targetNode.y0 : null,
+          nodeY1: targetNode && typeof targetNode.y1 === "number" ? targetNode.y1 : null,
+          count: backlinks.length,
+          backlinks,
+        });
+      } catch (e) {
+        // ignore debug failures
+      }
+    };
     let sortNodes = this.config.nodes.horizontalSort
       ? (node) => node.horizontalSort
       : null;
@@ -1739,9 +1826,11 @@ class SankeyChart {
     this.graph = identifyCircles(this.graph, sortNodes);
     this.graph = selectCircularLinkTypes(this.graph, this.config.id);
     this.graph = synchronizeBidirectionalLinks(this.graph, this.config.id);
+    _captureBacklinkStage("after/selectCircularLinkTypes#1");
 
     this.graph = computeNodeValues(this.graph);
     this.graph = computeNodeDepths(this.graph, sortNodes, align);
+    _captureBacklinkStage("after/computeNodeDepths");
 
     this.graph = createVirtualNodes(
       this.graph,
@@ -1763,20 +1852,57 @@ class SankeyChart {
       this.config.links.baseRadius
     );
 
+    // Optional: scale up ky so the diagram occupies more of the available height.
+    // Why: `computeNodeBreadths()` caps inter-node gaps to `nodes.padding`, which can leave
+    // large top/bottom margins when values are small. Scaling ky increases node/link thickness
+    // instead of increasing gaps, improving readability while using the container height.
+    //
+    // Enable with: nodes: { fillHeight: "scale" }
+    if (this.config.nodes && this.config.nodes.fillHeight === "scale") {
+      const graph = this.graph;
+      const available = graph.y1 - graph.y0;
+      const maxGapPerNode = this.config.nodes.padding;
+
+      const cols = groups(graph.nodes, (n) => n.column)
+        .sort((a, b) => a[0] - b[0])
+        .map((d) => d[1]);
+
+      let scaleUp = Infinity;
+      cols.forEach((nodes) => {
+        const n = nodes.length;
+        const sumVal = sum(nodes, (d) => (d.virtual ? 0 : d.value));
+        if (!sumVal || sumVal <= 0) return;
+        const neededAtCap = sumVal * graph.ky + Math.max(0, n - 1) * maxGapPerNode;
+        if (neededAtCap <= 0) return;
+        scaleUp = Math.min(scaleUp, available / neededAtCap);
+      });
+
+      if (Number.isFinite(scaleUp) && scaleUp > 1.0001) {
+        graph.ky = graph.ky * scaleUp;
+        graph.links.forEach(function (link) {
+          link.width = link.value * graph.ky;
+        });
+        this.graph = graph;
+      }
+    }
+
     
     this.graph = computeNodeBreadths.call(this);
     this.graph = resolveCollisionsAndRelax.call(this);
+    _captureBacklinkStage("after/computeNodeBreadths#1");
     
     // Recalculate circular link types based on final node positions
     this.graph = selectCircularLinkTypes(this.graph, this.config.id);
     // Synchronize bidirectional circular links to prevent overlap
     this.graph = synchronizeBidirectionalLinks(this.graph, this.config.id);
+    _captureBacklinkStage("after/selectCircularLinkTypes#2");
     // Update node circularLinkType based on predominant link types
     this.graph = computeNodeValues(this.graph);
     
     // Recalculate node positions with updated link types
     this.graph = computeNodeBreadths.call(this);
     this.graph = resolveCollisionsAndRelax.call(this);
+    _captureBacklinkStage("after/computeNodeBreadths#2");
     // Re-assign link ports after recomputing node positions using the SAME custom
     // circular-aware ordering. `computeLinkBreadths()` sorts circular ports in one
     // bottom-stacked band and can re-introduce backlink braiding/crossings.
@@ -1784,14 +1910,17 @@ class SankeyChart {
       this.graph,
       this.config.id,
       this.config.links.typeOrder,
-      this.config.links.typeAccessor
+      this.config.links.typeAccessor,
+      circularPortGapPx
     );
     this.graph = sortTargetLinks(
       this.graph,
       this.config.id,
       this.config.links.typeOrder,
-      this.config.links.typeAccessor
+      this.config.links.typeAccessor,
+      circularPortGapPx
     );
+    _captureBacklinkStage("after/sortTargetLinks#1");
 
     this.graph = straigtenVirtualNodes(this.graph);
 
@@ -1831,6 +1960,7 @@ class SankeyChart {
       this.config.links.baseRadius,
       this.config.links.verticalMargin
     );
+    _captureBacklinkStage("after/addCircularPathData#1");
 
     this.graph = adjustGraphExtents(
       this.graph,
@@ -1854,14 +1984,17 @@ class SankeyChart {
       this.graph,
       this.config.id,
       this.config.links.typeOrder,
-      this.config.links.typeAccessor
+      this.config.links.typeAccessor,
+      circularPortGapPx
     );
     this.graph = sortTargetLinks(
       this.graph,
       this.config.id,
       this.config.links.typeOrder,
-      this.config.links.typeAccessor
+      this.config.links.typeAccessor,
+      circularPortGapPx
     );
+    _captureBacklinkStage("after/sortTargetLinks#2");
     this.graph = straigtenVirtualNodes(this.graph);
 
     this.graph = addCircularPathData(
@@ -1871,6 +2004,7 @@ class SankeyChart {
       this.config.links.baseRadius,
       this.config.links.verticalMargin
     );
+    _captureBacklinkStage("after/addCircularPathData#2");
 
     const sortIters =
       typeof this.config.links.sortIterations === "number"
@@ -1881,17 +2015,21 @@ class SankeyChart {
         this.graph,
         this.config.id,
         this.config.links.typeOrder,
-        this.config.links.typeAccessor
+        this.config.links.typeAccessor,
+        circularPortGapPx
       );
       this.graph = sortTargetLinks(
         this.graph,
         this.config.id,
         this.config.links.typeOrder,
-        this.config.links.typeAccessor
+        this.config.links.typeAccessor,
+        circularPortGapPx
       );
+      _captureBacklinkStage("after/sortTargetLinks/iter#" + i);
     }
 
     this.graph = fillHeight(this.graph);
+    _captureBacklinkStage("after/fillHeight");
 
     const postSortIters =
       typeof this.config.links.postSortIterations === "number"
@@ -1902,14 +2040,17 @@ class SankeyChart {
         this.graph,
         this.config.id,
         this.config.links.typeOrder,
-        this.config.links.typeAccessor
+        this.config.links.typeAccessor,
+        circularPortGapPx
       );
       this.graph = sortTargetLinks(
         this.graph,
         this.config.id,
         this.config.links.typeOrder,
-        this.config.links.typeAccessor
+        this.config.links.typeAccessor,
+        circularPortGapPx
       );
+      _captureBacklinkStage("after/postSortTargetLinks/iter#" + i);
     }
 
     this.graph = addCircularPathData(
@@ -2022,14 +2163,17 @@ class SankeyChart {
       this.graph,
       this.config.id,
       this.config.links.typeOrder,
-      this.config.links.typeAccessor
+      this.config.links.typeAccessor,
+      circularPortGapPx
     );
     this.graph = sortTargetLinks(
       this.graph,
       this.config.id,
       this.config.links.typeOrder,
-      this.config.links.typeAccessor
+      this.config.links.typeAccessor,
+      circularPortGapPx
     );
+    _captureBacklinkStage("after/sortTargetLinks#final");
     this.graph = straigtenVirtualNodes(this.graph);
 
     this.graph = addCircularPathData(
@@ -2058,6 +2202,8 @@ class SankeyChart {
       .attr("width", this.config.width)
       .attr("height", this.config.height);
 
+    // Root group for all chart content. We'll optionally translate it in Y at the end
+    // to center (and fully fit) the rendered content inside the SVG viewport.
     let g = svg.append("g").attr("transform", "translate(0,0)");
 
     let linkG = g
@@ -2602,6 +2748,44 @@ class SankeyChart {
           })
           .style("fill", arrowColor);
       });
+    }
+
+    // Post-render vertical centering / fit:
+    // Some circular links extend beyond graph.y0/y1 (their control points live outside),
+    // and SVG will clip them if they extend beyond the viewport. We fix this WITHOUT
+    // changing the layout by translating the whole content group in Y so that:
+    // - if content height <= svg height: content is vertically centered
+    // - otherwise: best-effort shift to keep as much visible as possible
+    try {
+      const svgH = this.config.height;
+      const node = g.node && g.node();
+      if (node && typeof node.getBBox === "function" && Number.isFinite(svgH) && svgH > 0) {
+        const bb = node.getBBox();
+        const contentH = bb.height;
+        if (Number.isFinite(contentH) && contentH > 0 && Number.isFinite(bb.y)) {
+          // Desired top position for vertical centering
+          const desiredShift = (svgH - contentH) / 2 - bb.y;
+
+          // Clamp shift so the content stays within [0, svgH] when possible.
+          const minShift = -bb.y; // top at 0
+          const maxShift = svgH - (bb.y + contentH); // bottom at svgH
+          let shiftY = desiredShift;
+          if (Number.isFinite(minShift) && Number.isFinite(maxShift)) {
+            if (minShift <= maxShift) {
+              shiftY = Math.max(minShift, Math.min(desiredShift, maxShift));
+            } else {
+              // Content taller than viewport; can't satisfy both. Keep top visible.
+              shiftY = minShift;
+            }
+          }
+
+          if (Number.isFinite(shiftY) && Math.abs(shiftY) > 0.5) {
+            g.attr("transform", `translate(0,${shiftY})`);
+          }
+        }
+      }
+    } catch (e) {
+      // ignore centering errors (e.g. getBBox not supported)
     }
   }
 } // End of draw()

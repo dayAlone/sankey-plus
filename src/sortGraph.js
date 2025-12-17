@@ -157,6 +157,7 @@ export function ascendingBreadth(a, b) {
 export function sortSourceLinks(inputGraph, id, typeOrder, typeAccessor) {
 
   let graph = inputGraph;
+  const circularPortGap = arguments.length > 4 && Number.isFinite(arguments[4]) ? Math.max(0, arguments[4]) : 0;
 
   graph.nodes.forEach(function(node) {
     // move any nodes up which are off the bottom
@@ -345,7 +346,7 @@ export function sortSourceLinks(inputGraph, id, typeOrder, typeAccessor) {
     var ySourceBottom = node.y1;
     bottomBand0.forEach(function (link) {
       link.y0 = ySourceBottom - link.width / 2;
-      ySourceBottom -= link.width;
+      ySourceBottom -= link.width + circularPortGap;
     });
   });
 
@@ -356,6 +357,7 @@ export function sortSourceLinks(inputGraph, id, typeOrder, typeAccessor) {
 // sort and set the links' y1 for each node
 export function sortTargetLinks(inputGraph, id, typeOrder, typeAccessor) {
   let graph = inputGraph;
+  const circularPortGap = arguments.length > 4 && Number.isFinite(arguments[4]) ? Math.max(0, arguments[4]) : 0;
 
   graph.nodes.forEach(function(node) {
     var nodesTargetLinks = graph.links.filter(function(l) {
@@ -519,7 +521,7 @@ export function sortTargetLinks(inputGraph, id, typeOrder, typeAccessor) {
     var yTargetBottom = node.y1;
     bottomBand1.forEach(function (link) {
       link.y1 = yTargetBottom - link.width / 2;
-      yTargetBottom -= link.width;
+      yTargetBottom -= link.width + circularPortGap;
     });
   });
 

@@ -66,12 +66,17 @@ export function addCircularPathData(
         link.circularPathData.leftSmallArcRadius = selfLinkRadius;
         link.circularPathData.leftLargeArcRadius = selfLinkRadius;
 
-        // Margin for self-links - keep them compact rectangles (wider than tall).
-        // Use small factor so all self-loops have similar proportions regardless of stroke width.
-        // Minimum 8px ensures even thin links are visible.
-        var selfLoopMarginFactor = 3.0;
-        var selfLinkMargin = Math.max(20, selfLinkRadius * selfLoopMarginFactor + link.width * 0.4);
-        // Also add verticalBuffer to account for stacking with other circular links
+        // Margin for self-links: keep them compact and close to the node, but enforce a minimum
+        // so the loop doesn't collapse into the node stroke.
+        // NOTE: "closer to node" means smaller verticalFullExtent for bottom loops (and larger for top loops).
+        var minSelfLoopMargin = Math.max(12, selfLinkRadius + 4);
+        var selfLoopMarginFactor = 1.2;
+        var selfLinkMargin = Math.max(
+          minSelfLoopMargin,
+          selfLinkRadius * selfLoopMarginFactor + link.width * 0.2
+        );
+        // For self-loops we intentionally do NOT inflate vBuf here; vBuf is used for stacking.
+        // We want self-loops to stay "inner" and push others instead.
         var vBuf = link.circularPathData.verticalBuffer || 0;
         
         // IMPORTANT: keep self-loops compact by NOT applying the generic `baseOffset`
@@ -675,6 +680,80 @@ export function addCircularPathData(
     }
   }
 
+  // Post-pass: self-loops must always stay closer to the node than other bottom circular links
+  // that actually cross them, and should push those neighbors away.
+  //
+  // Rationale:
+  // - Port order (link.y0/y1) is separate from arc depth (verticalFullExtent).
+  // - For readability, self-loops should be inner (closest), and other bottom arcs should escape deeper.
+  var minSelfLoopExtraGap = circularLinkGap || 0;
+  if (minSelfLoopExtraGap >= 0) {
+    // Group candidate bottom circular links by node identity (use name as a fallback).
+    var nodesByName = {};
+    (graph.nodes || []).forEach(function(n) {
+      if (n && n.name) nodesByName[n.name] = n;
+    });
+
+    // Collect self-loops (bottom) first.
+    var bottomSelfLoops = graph.links.filter(function(l) {
+      return (
+        l &&
+        l.circular &&
+        l.circularLinkType === "bottom" &&
+        !l.isVirtual &&
+        selfLinking(l, id) &&
+        l.circularPathData &&
+        typeof l.circularPathData.verticalFullExtent === "number"
+      );
+    });
+
+    bottomSelfLoops.forEach(function(selfL) {
+      var node = selfL.source || (selfL.source && selfL.source.name ? nodesByName[selfL.source.name] : null);
+      if (!node || typeof node.y1 !== "number") return;
+
+      // Minimum depth for the self-loop: enough to accommodate its corner radius, but still compact.
+      var r =
+        selfL.circularPathData &&
+        typeof selfL.circularPathData.rightLargeArcRadius === "number"
+          ? selfL.circularPathData.rightLargeArcRadius
+          : (baseRadius + (selfL.width || 0) / 2);
+      var minDepth = Math.max(12, r + 4);
+      var desiredSelfVfe = node.y1 + minDepth;
+
+      // Pull self-loop up (closer to node) if it's deeper than necessary.
+      if (selfL.circularPathData.verticalFullExtent > desiredSelfVfe) {
+        var pullUp = selfL.circularPathData.verticalFullExtent - desiredSelfVfe;
+        selfL.circularPathData.verticalFullExtent = desiredSelfVfe;
+        // Keep verticalBuffer consistent (it acts as "how far from base" for many computations).
+        if (typeof selfL.circularPathData.verticalBuffer === "number") {
+          selfL.circularPathData.verticalBuffer = Math.max(0, selfL.circularPathData.verticalBuffer - pullUp);
+        }
+      }
+
+      // Push all other bottom circular links that actually cross this self-loop downwards
+      // so the self-loop stays inner.
+      graph.links.forEach(function(other) {
+        if (!other || other === selfL) return;
+        if (!other.circular || other.circularLinkType !== "bottom") return;
+        if (other.isVirtual) return;
+        if (!other.circularPathData || typeof other.circularPathData.verticalFullExtent !== "number") return;
+
+        if (!circularLinksActuallyCross(selfL, other)) return;
+
+        var required =
+          (circularLinkGap || 0) + ((selfL.width || 0) + (other.width || 0)) / 2;
+        var minOtherVfe = selfL.circularPathData.verticalFullExtent + required;
+        if (other.circularPathData.verticalFullExtent < minOtherVfe) {
+          var push = (minOtherVfe - other.circularPathData.verticalFullExtent) + 1e-6;
+          other.circularPathData.verticalFullExtent += push;
+          if (typeof other.circularPathData.verticalBuffer === "number") {
+            other.circularPathData.verticalBuffer += push;
+          }
+        }
+      });
+    });
+  }
+
   // Post-pass: enforce minimum vertical gap WITHIN each TOP target-node bundle.
   //
   // The global TOP min-gap pass only considers adjacency in overall VFE order; links targeting
@@ -895,7 +974,9 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap, graph, verticalMa
 
       var aSelf = selfLinking(a, id);
       var bSelf = selfLinking(b, id);
-      if (aSelf !== bSelf) return aSelf ? 1 : -1;
+      // Self-loops should stay inner (closer to node) and push other circular links away.
+      // Process them first so they get smaller verticalBuffer / smaller |verticalFullExtent - baseY|.
+      if (aSelf !== bSelf) return aSelf ? -1 : 1;
 
       // Special-case: for backlinks into the same target node with the same span from the same source column,
       // order by source vertical position DESC (lower sources first).
@@ -1130,82 +1211,8 @@ function calcVerticalBuffer(links, nodes, id, circularLinkGap, graph, verticalMa
     var linkIndexInGroup = currentGroup.links.indexOf(link);
 
     if (selfLinking(link, id)) {
-      // For self-links, keep them visually compact by only stacking with:
-      // - other self-links in the same column
-      // - very short circular links (span <= 1) that could overlap near the node
-      // Ignore long backlinks: they shouldn't force self-loops to have huge verticalBuffer.
-      // The global minimum-gap pass will handle any necessary vertical separation later.
-      
-      // Basic self-link buffer
-      link.circularPathData.verticalBuffer = buffer + link.width / 2;
-      
-      // Check for collisions ONLY with compact circular links (self-loops or span<=1)
-      for (var j = 0; j < i; j++) {
-        var prevLink = orderedLinks[j];
-        
-        // Skip long backlinks: they don't need tight stacking with self-loops
-        var prevSpan = Math.abs((prevLink.source.column || 0) - (prevLink.target.column || 0));
-        var prevIsSelf = selfLinking(prevLink, id);
-        if (!prevIsSelf && prevSpan > 1) {
-          continue; // Long backlink: skip collision check to keep self-loop compact
-        }
-        
-        if (circularLinksActuallyCross(link, prevLink)) {
-          // Check if both links share at least one node (for tighter spacing)
-          function sameNodeRef2(a, b) {
-            if (a === b) return true;
-            if (a && b && a.name !== undefined && b.name !== undefined) return a.name === b.name;
-            return false;
-          }
-          var sameNode = (
-            sameNodeRef2(link.source, prevLink.source) ||
-            sameNodeRef2(link.source, prevLink.target) ||
-            sameNodeRef2(link.target, prevLink.source) ||
-            sameNodeRef2(link.target, prevLink.target)
-          );
-          // Use no gap ONLY if both are self-links AND they share a node
-          var gap = circularLinkGap;
-          if (selfLinking(link, id) && selfLinking(prevLink, id) && sameNode) {
-            gap = 0;
-          }
-          
-          var bufferOverThisLink =
-            prevLink.circularPathData.verticalBuffer +
-            prevLink.width / 2 +
-            gap;
-            
-          // Offset correction helps reduce "holes", but must NOT eliminate circularGap
-          // for links targeting the same column/bundle.
-          var thisBaseY = link.circularPathData.baseY;
-          var prevBaseY = prevLink.circularPathData.baseY;
-          var offsetCorrection = 0;
-          
-          if (link.target.column !== prevLink.target.column) {
-            if (link.circularLinkType === "bottom") {
-              offsetCorrection = prevBaseY - thisBaseY;
-            } else {
-              offsetCorrection = thisBaseY - prevBaseY;
-            }
-          }
-          // Offset correction is meant to *reduce* required buffer when baseYs are naturally separated.
-          // It should never INCREASE buffer (that creates huge "holes" between stacked top links).
-          if (offsetCorrection > 0) offsetCorrection = 0;
-          
-          bufferOverThisLink += offsetCorrection;
-          // Enforce minimum gap even after correction to prevent overlap.
-          var minBuffer = prevLink.circularPathData.verticalBuffer + prevLink.width / 2 + circularLinkGap;
-          if (bufferOverThisLink < minBuffer) bufferOverThisLink = minBuffer;
-          
-          buffer = bufferOverThisLink > buffer ? bufferOverThisLink : buffer;
-        }
-      }
-      
-      var finalBuffer = buffer + link.width / 2;
-      // Self-loops should stay compact - rectangular shape, not square.
-      // Cap verticalBuffer tightly (~5px) so all self-loops have similar proportions.
-      var maxSelfLoopBuffer = 5;
-      if (finalBuffer > maxSelfLoopBuffer) finalBuffer = maxSelfLoopBuffer;
-      link.circularPathData.verticalBuffer = finalBuffer;
+      // Keep self-loops inner: do not stack them downward; instead, later links will be pushed away.
+      link.circularPathData.verticalBuffer = 0;
     } else {
       // Check collisions based on grouping:
       // - Within same group: only check previous links in same group (guarantees no crossings within group)

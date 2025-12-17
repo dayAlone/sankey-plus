@@ -28,28 +28,44 @@ export function adjustSankeySize(
     });
     graph.circularPortGapPx = 0;
 
+    // Compute ky from available vertical space.
+    //
+    // IMPORTANT: virtual nodes are routing helpers and should NOT consume padding budget.
+    // Counting virtual nodes in (nodes.length - 1) can make ky go negative on shorter charts
+    // (e.g. height 550), which breaks the whole layout (negative link widths, inverted nodes).
+    //
+    // Therefore we compute the padding term using ONLY non-virtual (real) nodes.
     var ky = min(columns, function (nodes) {
-      return (
-        (graph.y1 - graph.y0 - (nodes.length - 1) * graph.py) /
-        sum(nodes, function (d) {
-          return d.virtual ? 0 : d.value;
-        })
-      );
+      const realCount = nodes.reduce((acc, d) => acc + (d && d.virtual ? 0 : 1), 0);
+      const gapCount = Math.max(0, realCount - 1);
+      const sumVal = sum(nodes, function (d) {
+        return d && d.virtual ? 0 : d.value;
+      });
+      if (!sumVal || sumVal <= 0) return 0;
+      const available = (graph.y1 - graph.y0);
+      // If chart is too short to accommodate the requested padding, allow padding to compress.
+      // This keeps ky >= 0 and avoids catastrophic layout failures.
+      const pyEff = gapCount > 0 ? Math.min(graph.py, available / gapCount) : 0;
+      const numer = available - gapCount * pyEff;
+      return numer > 0 ? (numer / sumVal) : 0;
     });
 
     let maxColumnSum = max(columns, function (nodes) {
+      const realCount = nodes.reduce((acc, d) => acc + (d && d.virtual ? 0 : 1), 0);
+      const gapCount = Math.max(0, realCount - 1);
       let sumNodesValue =
         sum(nodes, function (d) {
-          return d.virtual ? 0 : d.value;
+          return d && d.virtual ? 0 : d.value;
         }) +
-        (nodes.length - 1) * graph.py;
+        gapCount * graph.py;
       return sumNodesValue;
     });
 
     let ky1 = (graph.y1 - graph.y0) / maxColumnSum;
 
-    //calculate the widths of the links
-    graph.ky = ky * scale;
+    // calculate the widths of the links
+    // Guard: ky must be finite and non-negative
+    graph.ky = (Number.isFinite(ky) && ky > 0 ? ky : 0) * scale;
 
     graph.links.forEach(function (link) {
       link.width = link.value * graph.ky;
