@@ -879,3 +879,96 @@ test("top min-gap (cross-target): filter→saved_filters_search ● and schedule
   const gapNow = innerTopEdge - outerBottomEdge;
   assert.ok(gapNow >= 1 - 1e-6, `Expected gap>=1, got ${gapNow.toFixed(3)}`);
 });
+
+test("bottom min-gap (cross-target): schedule ○→search ● and schedule ●→schedule ○ keep >= circularGap when their bottom bands overlap", () => {
+  const debugHtml = fs.readFileSync(path.join(__dirname, "..", "test-debug.html"), "utf8");
+  const nodesMatch = debugHtml.match(/\b(?:let|const)\s+nodes\s*=\s*(\[[\s\S]*?\]);/);
+  const linksMatch = debugHtml.match(/\b(?:let|const)\s+links\s*=\s*(\[[\s\S]*?\]);/);
+  assert.ok(nodesMatch, "Failed to parse nodes from test-debug.html");
+  assert.ok(linksMatch, "Failed to parse links from test-debug.html");
+  // eslint-disable-next-line no-new-func
+  const fullNodes = Function(`"use strict"; return (${nodesMatch[1]});`)();
+  // eslint-disable-next-line no-new-func
+  const fullLinks = Function(`"use strict"; return (${linksMatch[1]});`)();
+
+  const chart = new SankeyChart({
+    align: "left",
+    id: (d) => d.name,
+    iterations: 10,
+    scale: 0.3,
+    padding: 25,
+    width: 1200,
+    height: 600,
+    nodes: {
+      data: fullNodes.map((n) => ({ ...n })),
+      width: 15,
+      padding: 25,
+      minPadding: 30,
+      virtualPadding: 7,
+      horizontalSort: true,
+      verticalSort: true,
+      setPositions: false,
+      fill: () => "#ccc",
+    },
+    links: {
+      data: fullLinks.map((l) => ({ ...l })),
+      circularGap: 1,
+      circularLinkPortionTopBottom: 0.4,
+      circularLinkPortionLeftRight: 0.1,
+      useVirtualRoutes: true,
+      baseRadius: 5,
+      verticalMargin: 20,
+      horizontalMargin: 100,
+      opacity: 0.7,
+      virtualLinkType: "bezier",
+      color: "lightgrey",
+      sortIterations: 12,
+      postSortIterations: 4,
+      typeOrder: ["booking", "search_loop", "primary", "secondary", "search_nearby"],
+      typeAccessor: (d) => d.type,
+      types: {},
+    },
+    arrows: { enabled: false },
+  });
+  chart.process();
+
+  const a = chart.graph.links.find(
+    (l) =>
+      l.circular &&
+      !l.isVirtual &&
+      l.circularLinkType === "bottom" &&
+      l.source?.name === "schedule ○" &&
+      l.target?.name === "search ●"
+  );
+  const b = chart.graph.links.find(
+    (l) =>
+      l.circular &&
+      !l.isVirtual &&
+      l.circularLinkType === "bottom" &&
+      l.source?.name === "schedule ●" &&
+      l.target?.name === "schedule ○"
+  );
+  assert.ok(a, "Missing BOTTOM link schedule ○ → search ●");
+  assert.ok(b, "Missing BOTTOM link schedule ● → schedule ○");
+
+  const ca = a.circularPathData;
+  const cb = b.circularPathData;
+  assert.ok(ca && cb, "Missing circularPathData");
+
+  // Meaningful: bottom-band X overlap.
+  const aL = Math.min(ca.leftInnerExtent, ca.rightInnerExtent);
+  const aR = Math.max(ca.leftInnerExtent, ca.rightInnerExtent);
+  const bL = Math.min(cb.leftInnerExtent, cb.rightInnerExtent);
+  const bR = Math.max(cb.leftInnerExtent, cb.rightInnerExtent);
+  const xOverlap = Math.min(aR, bR) - Math.max(aL, bL);
+  assert.ok(xOverlap > 1e-6, `Expected bottom-band X overlap, got ${xOverlap}`);
+
+  // Enforce min separation in bottom band regardless of exact ordering.
+  // Pick inner/outer by VFE (outer is deeper = larger VFE).
+  const inner = ca.verticalFullExtent <= cb.verticalFullExtent ? a : b;
+  const outer = inner === a ? b : a;
+  const innerBottomEdge = inner.circularPathData.verticalFullExtent + (inner.width || 0) / 2;
+  const outerTopEdge = outer.circularPathData.verticalFullExtent - (outer.width || 0) / 2;
+  const gapNow = outerTopEdge - innerBottomEdge;
+  assert.ok(gapNow >= 1 - 1e-6, `Expected gap>=1, got ${gapNow.toFixed(3)}`);
+});

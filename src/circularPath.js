@@ -717,7 +717,7 @@ export function addCircularPathData(
         typeof l.circularPathData.verticalFullExtent === "number"
       );
     });
-    // Iterate because pushing one link down can reorder the sorted adjacency,
+    // Iterate because pushing one link down can reorder adjacency,
     // and the invariant is defined on the final sorted order.
     var maxIters = 10;
     for (var it = 0; it < maxIters; it++) {
@@ -725,29 +725,61 @@ export function addCircularPathData(
       bottomCircular.sort(function(a, b) {
         return a.circularPathData.verticalFullExtent - b.circularPathData.verticalFullExtent;
       });
-      for (var bi = 1; bi < bottomCircular.length; bi++) {
-        var prevL = bottomCircular[bi - 1];
+
+      for (var bi = 0; bi < bottomCircular.length; bi++) {
         var currL = bottomCircular[bi];
-        // Only enforce a gap when these two links can actually overlap/cross.
-        // Otherwise this "global band" rule creates artificial holes by pushing
-        // unrelated links further down.
-        if (!circularLinksActuallyCross(prevL, currL)) continue;
-        var prevBottom =
-          prevL.circularPathData.verticalFullExtent + (prevL.width || 0) / 2;
-        var currTop =
-          currL.circularPathData.verticalFullExtent - (currL.width || 0) / 2;
-        var gapNow = currTop - prevBottom;
-        if (gapNow < minBottomGap) {
-          // Add a tiny epsilon so downstream strict comparisons (gap >= circularGap)
-          // don't fail due to floating point rounding.
-          var push = (minBottomGap - gapNow) + 1e-6;
-          currL.circularPathData.verticalFullExtent += push;
+        var currW = currL.width || 0;
+        var currVfe = currL.circularPathData.verticalFullExtent;
+        var targetVfe = currVfe;
+
+        // Bottom-band X range (inner extents).
+        var cL =
+          typeof currL.circularPathData.leftInnerExtent === "number" &&
+          typeof currL.circularPathData.rightInnerExtent === "number"
+            ? Math.min(currL.circularPathData.leftInnerExtent, currL.circularPathData.rightInnerExtent)
+            : undefined;
+        var cR =
+          typeof currL.circularPathData.leftInnerExtent === "number" &&
+          typeof currL.circularPathData.rightInnerExtent === "number"
+            ? Math.max(currL.circularPathData.leftInnerExtent, currL.circularPathData.rightInnerExtent)
+            : undefined;
+
+        for (var pj = 0; pj < bi; pj++) {
+          var prevL = bottomCircular[pj];
+
+          // For very local bottom links (span<=1), keep the old conservative behavior:
+          // only enforce against links that actually cross. This preserves compactness.
+          var span = Math.abs((currL.source.column || 0) - (currL.target.column || 0));
+          var overlaps = circularLinksActuallyCross(prevL, currL);
+          if (!overlaps && span > 1 && cL !== undefined && cR !== undefined) {
+            if (
+              typeof prevL.circularPathData.leftInnerExtent === "number" &&
+              typeof prevL.circularPathData.rightInnerExtent === "number"
+            ) {
+              var pL = Math.min(prevL.circularPathData.leftInnerExtent, prevL.circularPathData.rightInnerExtent);
+              var pR = Math.max(prevL.circularPathData.leftInnerExtent, prevL.circularPathData.rightInnerExtent);
+              var xOverlap = Math.min(pR, cR) - Math.max(pL, cL);
+              overlaps = xOverlap > 1e-6;
+            }
+          }
+          if (!overlaps) continue;
+
+          var prevW = prevL.width || 0;
+          var prevBottom = prevL.circularPathData.verticalFullExtent + prevW / 2;
+          var allowedCurrVfe = prevBottom + minBottomGap + currW / 2;
+          if (targetVfe < allowedCurrVfe) targetVfe = allowedCurrVfe;
+        }
+
+        if (targetVfe > currVfe + 1e-12) {
+          var push = (targetVfe - currVfe) + 1e-6;
+          currL.circularPathData.verticalFullExtent = currVfe + push;
           if (typeof currL.circularPathData.verticalBuffer === "number") {
             currL.circularPathData.verticalBuffer += push;
           }
           changed = true;
         }
       }
+
       if (!changed) break;
     }
   }
