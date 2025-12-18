@@ -146,6 +146,15 @@ export function addCircularPathData(
           var bd = Math.abs((b.source.column || 0) - (b.target.column || 0));
           if (ad !== bd) return ad - bd;
 
+          // Special case: same-column circulars (span=0) are extremely local. Prefer thinner links more inner
+          // so we don't push small cycles outward unnecessarily (e.g. listing ○→filter should not end up
+          // outside the listing ○ self-loop just because another thicker span=0 link exists in the column).
+          if (ad === 0) {
+            var aw = a.width || 0;
+            var bw = b.width || 0;
+            if (aw !== bw) return aw - bw;
+          }
+
           // 2) Group by target node position (keeps links to same target region together).
           // Special case: bottom *backlinks* should route local (lower) targets closer to the node
           // and push upper targets farther (outer radius) to avoid near-node braiding.
@@ -155,6 +164,18 @@ export function addCircularPathData(
             a.circularLinkType === "bottom" && (a.target.column || 0) < (a.source.column || 0);
           var bIsBottomBacklink =
             b.circularLinkType === "bottom" && (b.target.column || 0) < (b.source.column || 0);
+          // NOTE: For BOTTOM circular links we generally want "lower target => more inner" ordering,
+          // because those links share the bottom shelf and should exit the column in a consistent stack.
+          // The original rule applied only to "backlinks", but in practice we also want it for bottom
+          // forward cycles within the same column to avoid cases where a higher target exits earlier.
+          if (
+            a.circularLinkType === "bottom" &&
+            b.circularLinkType === "bottom" &&
+            Math.abs(aTgtY0 - bTgtY0) >= 1e-6
+          ) {
+            // Descending y0: lower targets first (inner), upper targets last (outer).
+            return bTgtY0 - aTgtY0;
+          }
           if (aIsBottomBacklink && bIsBottomBacklink) {
             // Descending y0: lower targets first (inner), upper targets last (outer).
             if (Math.abs(aTgtY0 - bTgtY0) >= 1e-6) return bTgtY0 - aTgtY0;
@@ -189,15 +210,26 @@ export function addCircularPathData(
           return (a.circularLinkID || 0) - (b.circularLinkID || 0);
         });
 
+        // SOURCE-side (right) lane assignment:
+        //
+        // We need a stable left-to-right ordering for all circular links in a source column (per band),
+        // even if their right-leg segments don't overlap in Y, because their long top/bottom arcs can still
+        // intersect later in the diagram.
+        //
+        // However, the old algorithm over-spaced because it summed FULL widths and then also added `i*circularGap`,
+        // effectively double-counting stroke widths for neighbors.
+        //
+        // New rule: between adjacent "lanes", centerlines should be separated by:
+        //   (prevWidth/2 + currWidth/2) + circularGap
+        // i.e. we accumulate half-widths + gap, then add the current half-width.
         var radiusOffset = 0;
-        sameColumnLinks.forEach(function (l, i) {
+        sameColumnLinks.forEach(function (l) {
           if (l.circularLinkID == link.circularLinkID) {
-            link.circularPathData.rightSmallArcRadius =
-              baseRadius + link.width / 2 + radiusOffset;
-            link.circularPathData.rightLargeArcRadius =
-              baseRadius + link.width / 2 + i * circularLinkGap + radiusOffset;
+            var r = baseRadius + link.width / 2 + radiusOffset;
+            link.circularPathData.rightSmallArcRadius = r;
+            link.circularPathData.rightLargeArcRadius = r;
           }
-          radiusOffset = radiusOffset + l.width;
+          radiusOffset = radiusOffset + (l.width || 0) / 2 + circularLinkGap;
         });
 
         // add left extent coordinates.
@@ -207,6 +239,7 @@ export function addCircularPathData(
         // in the same column and can shrink enough that multiple thick links end up with near-identical
         // left vertical-leg X positions => visible overlap at node entry.
         thisColumn = link.target.column;
+        var linkIsSelfLoop = selfLinking(link, id);
         sameColumnLinks = graph.links.filter(function (l) {
           if (!(l && l.circular && l.circularLinkType == thisCircularLinkType)) return false;
           // Always group by target node identity on the LEFT side.
@@ -219,6 +252,11 @@ export function addCircularPathData(
           //   left-leg clearance post-pass (which checks vertical overlap and enforces `circularLinkGap`).
           //
           // Do NOT group by `type`: users may change types; geometry must remain stable.
+          //
+          // IMPORTANT: self-loops should NOT consume left-side radius budget for other links.
+          // Otherwise, a large self-loop on the target node can shift unrelated incoming circular
+          // links far to the left even if we don't actually need self-loop clearance.
+          if (!linkIsSelfLoop && selfLinking(l, id)) return false;
           return id(l.target) === id(link.target);
         });
         // Target side radii: cluster by TARGET node first to avoid horizontal alternating,
@@ -272,7 +310,7 @@ export function addCircularPathData(
           return (a.circularLinkID || 0) - (b.circularLinkID || 0);
         });
 
-        radiusOffset = 0;
+        var radiusOffset = 0;
         sameColumnLinks.forEach(function (l, i) {
           if (l.circularLinkID == link.circularLinkID) {
             // Use cumulative-width spacing so adjacent links have enough separation for their stroke widths.
@@ -527,13 +565,100 @@ export function addCircularPathData(
     });
   });
 
+  // Pre-pass: ensure self-loops do not overlap other circular links on the RIGHT vertical leg.
+  //
+  // This is a *narrow* cross-band rule (TOP vs BOTTOM), needed because different-band links can still
+  // share the same right-leg X in the same source column and visually merge.
+  //
+  // Scope:
+  // - group by source column
+  // - only when there is a self-loop in that column
+  // - only when the right-leg segments overlap in Y (use circularPathData sourceY/verticalRightInnerExtent)
+  // - never inflate the self-loop; instead push the non-self link to the RIGHT of the loop
+  var selfLoopsBySourceCol = {};
+  graph.links.forEach(function(l) {
+    if (!l || !l.circular || l.isVirtual) return;
+    if (!selfLinking(l, id)) return;
+    if (!l.circularPathData || typeof l.circularPathData.rightLargeArcRadius !== "number") return;
+    var col = l.source && typeof l.source.column === "number" ? String(l.source.column) : null;
+    if (!col) return;
+    if (!selfLoopsBySourceCol[col]) selfLoopsBySourceCol[col] = [];
+    selfLoopsBySourceCol[col].push(l);
+  });
+
+  function _rightLegSeg(link) {
+    var c = link.circularPathData;
+    var a = c.sourceY;
+    var b = c.verticalRightInnerExtent;
+    return [Math.min(a, b), Math.max(a, b)];
+  }
+
+  Object.keys(selfLoopsBySourceCol).forEach(function(col) {
+    var loops = selfLoopsBySourceCol[col];
+    if (!loops || !loops.length) return;
+    // All circular links in this source column (both top + bottom).
+    var group = graph.links.filter(function(l) {
+      if (!l || !l.circular || l.isVirtual) return false;
+      if (!l.circularPathData || typeof l.circularPathData.rightLargeArcRadius !== "number") return false;
+      var ccol = l.source && typeof l.source.column === "number" ? String(l.source.column) : null;
+      return ccol === col && !selfLinking(l, id);
+    });
+    if (!group.length) return;
+
+    var maxIters = 10;
+    for (var it = 0; it < maxIters; it++) {
+      var changed = false;
+      for (var li = 0; li < loops.length; li++) {
+        var loop = loops[li];
+        if (!loop || !loop.circularPathData) continue;
+        var loopSeg = _rightLegSeg(loop);
+        var loopW = loop.width || 0;
+        var loopSrcId = loop.source ? id(loop.source) : null;
+
+        for (var gi = 0; gi < group.length; gi++) {
+          var other = group[gi];
+          if (!other || !other.circularPathData) continue;
+          // Only handle cross-NODE overlaps (same column, different source node).
+          // Same-source-node interactions are already handled by within-band right leg clearance and
+          // port ordering; pushing them here causes unnecessary blow-outs (e.g. search ◐→search ○).
+          if (loopSrcId && other.source && id(other.source) === loopSrcId) continue;
+
+          var otherSeg = _rightLegSeg(other);
+          var vOv = Math.max(0, Math.min(loopSeg[1], otherSeg[1]) - Math.max(loopSeg[0], otherSeg[0]));
+          if (vOv <= 1e-6) continue;
+
+          // Ensure OTHER is to the right of LOOP by >= circularGap.
+          // NOTE: current is edge-to-edge already (we subtract +/- width/2), so don't add widths again.
+          var otherW = other.width || 0;
+          var required = circularLinkGap || 0;
+          var current =
+            (other.circularPathData.rightFullExtent - otherW / 2) -
+            (loop.circularPathData.rightFullExtent + loopW / 2);
+          if (current < required) {
+            var delta = (required - current) + 1e-6;
+            other.circularPathData.rightLargeArcRadius += delta;
+            if (typeof other.circularPathData.rightSmallArcRadius === "number") {
+              other.circularPathData.rightSmallArcRadius += delta;
+              if (other.circularPathData.rightSmallArcRadius > other.circularPathData.rightLargeArcRadius) {
+                other.circularPathData.rightSmallArcRadius = other.circularPathData.rightLargeArcRadius;
+              }
+            }
+            other.circularPathData.rightFullExtent =
+              other.circularPathData.sourceX +
+              other.circularPathData.rightLargeArcRadius +
+              (other.circularPathData.rightNodeBuffer || 0);
+            changed = true;
+          }
+        }
+      }
+      if (!changed) break;
+    }
+  });
+
   // Post-pass: enforce minimum clearance between RIGHT vertical legs (same source column + same top/bottom band).
   //
-  // Right leg clearance: ensure minimum horizontal gap between ALL circular links
+  // Right leg clearance: ensure minimum horizontal gap between circular links
   // from the same source column that have overlapping vertical ranges.
-  // Note: we keep TOP and BOTTOM in separate groups to avoid unnecessary cross-band pushing.
-  //
-  // We group by source column + band and check vertical overlap before applying clearance.
   var rightGroups = {};
   graph.links.forEach(function(l) {
     if (!l.circular) return;
@@ -568,7 +693,12 @@ export function addCircularPathData(
         var ab = a.circularPathData._rightFullExtentBase;
         var bb = b.circularPathData._rightFullExtentBase;
         if (ab !== bb) return ab - bb;
-        // Current rfe as tie-break (keeps determinism if bases tie)
+        // If bases tie (common after pre-passes), prefer the port-ordering principle:
+        // smaller span should be more inner than larger span.
+        var ad = Math.abs((a.source && a.source.column || 0) - (a.target && a.target.column || 0));
+        var bd = Math.abs((b.source && b.source.column || 0) - (b.target && b.target.column || 0));
+        if (ad !== bd) return ad - bd;
+        // Current rfe as last-resort tie-break (keeps determinism if everything ties)
         var ar = a.circularPathData.rightFullExtent;
         var br = b.circularPathData.rightFullExtent;
         if (ar !== br) return ar - br;
@@ -580,21 +710,25 @@ export function addCircularPathData(
         var curr = group[i];     // outer (larger rfe)
         
         // Check vertical overlap on right leg.
-        // For TOP: Y range is [vfe, source.y0]
-        // For BOTTOM: Y range is [source.y1, vfe]
+        // IMPORTANT: use the actual source port position (link.y0), not node y0/y1.
+        // Using node coords makes the overlap test too broad / too narrow depending on node height,
+        // and can miss real overlaps with self-loops and same-column circulars.
+        //
+        // For TOP: Y range is [vfe, link.y0]
+        // For BOTTOM: Y range is [link.y0, vfe]
         var prevYMin, prevYMax, currYMin, currYMax;
         if (prev.circularLinkType === 'top') {
           prevYMin = prev.circularPathData.verticalFullExtent;
-          prevYMax = prev.source.y0;
+          prevYMax = (typeof prev.y0 === "number") ? prev.y0 : prev.source.y0;
         } else {
-          prevYMin = prev.source.y1;
+          prevYMin = (typeof prev.y0 === "number") ? prev.y0 : prev.source.y1;
           prevYMax = prev.circularPathData.verticalFullExtent;
         }
         if (curr.circularLinkType === 'top') {
           currYMin = curr.circularPathData.verticalFullExtent;
-          currYMax = curr.source.y0;
+          currYMax = (typeof curr.y0 === "number") ? curr.y0 : curr.source.y0;
         } else {
-          currYMin = curr.source.y1;
+          currYMin = (typeof curr.y0 === "number") ? curr.y0 : curr.source.y1;
           currYMax = curr.circularPathData.verticalFullExtent;
         }
         
@@ -626,6 +760,375 @@ export function addCircularPathData(
         }
       }
       if (!rightChanged) break;
+    }
+  });
+
+  // Post-pass: enforce minimum clearance between RIGHT vertical legs across TOP/BOTTOM bands
+  // within the same source column, when their right-leg Y ranges overlap.
+  //
+  // Why:
+  // - TOP vs BOTTOM links can still share the same physical right-leg region in a column.
+  // - We want them to separate by ~circularGap when they overlap in Y, but NOT accumulate
+  //   extra "radiusOffset" spacing just because they're in the same column.
+  //
+  // Scope:
+  // - group by source column
+  // - exclude self-loops (handled by dedicated self-loop clearance)
+  // - exclude same-source-node interactions (port ordering + within-band clearance should handle)
+  var crossBandRight = {};
+  graph.links.forEach(function(l) {
+    if (!l || !l.circular || l.isVirtual) return;
+    if (!l.circularPathData || typeof l.circularPathData.rightLargeArcRadius !== "number") return;
+    if (selfLinking(l, id)) return;
+    var sourceKey =
+      l.source && typeof l.source.column === "number"
+        ? String(l.source.column)
+        : String(Math.round((l.circularPathData.sourceX || 0) * 10) / 10);
+    if (!crossBandRight[sourceKey]) crossBandRight[sourceKey] = [];
+    crossBandRight[sourceKey].push(l);
+  });
+
+  Object.keys(crossBandRight).forEach(function(k) {
+    var group = crossBandRight[k];
+    if (!group || group.length < 2) return;
+
+    // Stable inner->outer preference: smaller span should be more inner; if spans tie, smaller current rfe is inner.
+    group.sort(function(a, b) {
+      var ad = Math.abs((a.source && a.source.column || 0) - (a.target && a.target.column || 0));
+      var bd = Math.abs((b.source && b.source.column || 0) - (b.target && b.target.column || 0));
+      if (ad !== bd) return ad - bd;
+      var ar = a.circularPathData.rightFullExtent;
+      var br = b.circularPathData.rightFullExtent;
+      if (ar !== br) return ar - br;
+      return (a.circularLinkID || 0) - (b.circularLinkID || 0);
+    });
+
+    function rightLegSeg(link) {
+      var c = link.circularPathData;
+      var a = c.sourceY;
+      var b = c.verticalRightInnerExtent;
+      return [Math.min(a, b), Math.max(a, b)];
+    }
+
+    var slack = 0.25; // allow small extra without churning
+    var maxIters = 25;
+    for (var it = 0; it < maxIters; it++) {
+      var changed = false;
+
+      // Re-sort each iteration because we may move links outward.
+      group.sort(function(a, b) {
+        var ad = Math.abs((a.source && a.source.column || 0) - (a.target && a.target.column || 0));
+        var bd = Math.abs((b.source && b.source.column || 0) - (b.target && b.target.column || 0));
+        if (ad !== bd) return ad - bd;
+        var ar = a.circularPathData.rightFullExtent;
+        var br = b.circularPathData.rightFullExtent;
+        if (ar !== br) return ar - br;
+        return (a.circularLinkID || 0) - (b.circularLinkID || 0);
+      });
+
+      for (var i = 1; i < group.length; i++) {
+        var prev = group[i - 1];
+        var curr = group[i];
+        if (!prev || !curr) continue;
+
+        var sameSourceNode = prev.source && curr.source && id(prev.source) === id(curr.source);
+
+        // Use the actual right-leg segment (sourceY ↔ verticalRightInnerExtent).
+        var pSeg = rightLegSeg(prev);
+        var cSeg = rightLegSeg(curr);
+        var verticalOverlap = Math.max(0, Math.min(pSeg[1], cSeg[1]) - Math.max(pSeg[0], cSeg[0]));
+        if (verticalOverlap <= 1e-6) continue;
+
+        var prevW = prev.width || 0;
+        var currW = curr.width || 0;
+        var prevRight = prev.circularPathData.rightFullExtent + prevW / 2;
+        var currLeft = curr.circularPathData.rightFullExtent - currW / 2;
+        var gap = currLeft - prevRight;
+        var required = circularLinkGap || 0;
+
+        // Same-source-node ordering (very narrow):
+        // If two non-self circular links exit the SAME node and their right legs overlap in Y,
+        // enforce intuitive target-vertical ordering so "higher target" doesn't exit earlier than
+        // "lower target" on the same shelf.
+        //
+        // For BOTTOM: lower target (larger y0) should be more inner than higher target.
+        // If we see the reverse (higher target is inner), push the higher-target link outward past the lower one.
+        if (sameSourceNode && prev.circularLinkType === "bottom" && curr.circularLinkType === "bottom") {
+          var prevTgtY0 = prev.target && typeof prev.target.y0 === "number" ? prev.target.y0 : 0;
+          var currTgtY0 = curr.target && typeof curr.target.y0 === "number" ? curr.target.y0 : 0;
+          // prev is currently more inner (smaller rfe). If prev targets a HIGHER node (smaller y0),
+          // ordering is wrong for bottom shelves.
+          if (prevTgtY0 < currTgtY0 - 1e-6) {
+            var desiredPrevRfe =
+              curr.circularPathData.rightFullExtent + (prevW + currW) / 2 + required + 1e-6;
+            if (desiredPrevRfe > prev.circularPathData.rightFullExtent + 1e-6) {
+              var dOrd = desiredPrevRfe - prev.circularPathData.rightFullExtent;
+              prev.circularPathData.rightLargeArcRadius += dOrd;
+              if (typeof prev.circularPathData.rightSmallArcRadius === "number") {
+                prev.circularPathData.rightSmallArcRadius += dOrd;
+                if (prev.circularPathData.rightSmallArcRadius > prev.circularPathData.rightLargeArcRadius) {
+                  prev.circularPathData.rightSmallArcRadius = prev.circularPathData.rightLargeArcRadius;
+                }
+              }
+              prev.circularPathData.rightFullExtent =
+                prev.circularPathData.sourceX +
+                prev.circularPathData.rightLargeArcRadius +
+                (prev.circularPathData.rightNodeBuffer || 0);
+              changed = true;
+              continue; // re-sort next iteration to realize the new ordering
+            }
+          }
+        }
+
+        // Skip other same-source-node pairs to avoid blowing apart same-node local cycles.
+        if (sameSourceNode) continue;
+
+        // Band ordering (revised): ONLY when right-leg segments overlap in Y.
+        //
+        // Desired order for this layout: BOTTOM links are more inner than TOP links,
+        // so bottom shelves sit "before" top backlinks in the same source column.
+        //
+        // Exception: span=0 TOP cycles are very local and should remain compact/inner.
+        // (e.g. filter→listing ○ should stay inside the bottom shelves.)
+        if (prev.circularLinkType === "top" && curr.circularLinkType === "bottom") {
+          var prevSpan = Math.abs((prev.source && prev.source.column || 0) - (prev.target && prev.target.column || 0));
+          if (prevSpan !== 0) {
+            var desiredPrevRfe =
+              curr.circularPathData.rightFullExtent + (prevW + currW) / 2 + required + 1e-6;
+            if (desiredPrevRfe > prev.circularPathData.rightFullExtent + 1e-6) {
+              var dSwap = desiredPrevRfe - prev.circularPathData.rightFullExtent;
+              prev.circularPathData.rightLargeArcRadius += dSwap;
+              if (typeof prev.circularPathData.rightSmallArcRadius === "number") {
+                prev.circularPathData.rightSmallArcRadius += dSwap;
+                if (prev.circularPathData.rightSmallArcRadius > prev.circularPathData.rightLargeArcRadius) {
+                  prev.circularPathData.rightSmallArcRadius = prev.circularPathData.rightLargeArcRadius;
+                }
+              }
+              prev.circularPathData.rightFullExtent =
+                prev.circularPathData.sourceX +
+                prev.circularPathData.rightLargeArcRadius +
+                (prev.circularPathData.rightNodeBuffer || 0);
+              changed = true;
+              continue; // re-sort next iteration to realize the new ordering
+            }
+          }
+        }
+
+        if (gap < required) {
+          // Push curr outward to satisfy minimum clearance.
+          var delta = required - gap + 1e-6;
+          curr.circularPathData.rightLargeArcRadius += delta;
+          if (typeof curr.circularPathData.rightSmallArcRadius === "number") {
+            curr.circularPathData.rightSmallArcRadius += delta;
+            if (curr.circularPathData.rightSmallArcRadius > curr.circularPathData.rightLargeArcRadius) {
+              curr.circularPathData.rightSmallArcRadius = curr.circularPathData.rightLargeArcRadius;
+            }
+          }
+          curr.circularPathData.rightFullExtent =
+            curr.circularPathData.sourceX +
+            curr.circularPathData.rightLargeArcRadius +
+            (curr.circularPathData.rightNodeBuffer || 0);
+          changed = true;
+        } else if (gap > required + slack) {
+          // If we're *too* far apart, compact by moving the INNER (prev) outward.
+          var desiredPrevRightEdge = currLeft - required;
+          var desiredPrevRfe = desiredPrevRightEdge - prevW / 2;
+          var maxPrevRfe = curr.circularPathData.rightFullExtent - (prevW + currW) / 2 - required - 1e-6;
+          if (desiredPrevRfe > maxPrevRfe) desiredPrevRfe = maxPrevRfe;
+          if (desiredPrevRfe > prev.circularPathData.rightFullExtent + 1e-6) {
+            var d2 = desiredPrevRfe - prev.circularPathData.rightFullExtent;
+            prev.circularPathData.rightLargeArcRadius += d2;
+            if (typeof prev.circularPathData.rightSmallArcRadius === "number") {
+              prev.circularPathData.rightSmallArcRadius += d2;
+              if (prev.circularPathData.rightSmallArcRadius > prev.circularPathData.rightLargeArcRadius) {
+                prev.circularPathData.rightSmallArcRadius = prev.circularPathData.rightLargeArcRadius;
+              }
+            }
+            prev.circularPathData.rightFullExtent =
+              prev.circularPathData.sourceX +
+              prev.circularPathData.rightLargeArcRadius +
+              (prev.circularPathData.rightNodeBuffer || 0);
+            changed = true;
+          }
+        }
+      }
+
+      if (!changed) break;
+    }
+  });
+
+  // Pre-pass: ensure incoming links at a target node clear that node's self-loop on the LEFT leg.
+  //
+  // Why:
+  // - Self-loops were intentionally excluded from left-leg clearance / left-side radius budgeting to keep
+  //   unrelated links compact.
+  // - But when a self-loop's left leg vertically overlaps an incoming link's left leg, they must still
+  //   be separated horizontally; otherwise the two vertical legs visually merge.
+  //
+  // Scope:
+  // - Only links that share the SAME target node as the self-loop (node-local, not whole column).
+  // - Only when their left-leg segments overlap in Y (based on circularPathData targetY/verticalLeftInnerExtent).
+  // - Never inflate the self-loop; instead push the OTHER link left by increasing its left arc radius.
+  var leftSelfLoopByTarget = {};
+  graph.links.forEach(function(l) {
+    if (!l || !l.circular || l.isVirtual) return;
+    if (!selfLinking(l, id)) return;
+    if (!l.circularPathData || typeof l.circularPathData.leftLargeArcRadius !== "number") return;
+    var tgtKey = id(l.target);
+    if (!leftSelfLoopByTarget[tgtKey]) leftSelfLoopByTarget[tgtKey] = [];
+    leftSelfLoopByTarget[tgtKey].push(l);
+  });
+
+  Object.keys(leftSelfLoopByTarget).forEach(function(tgtKey) {
+    var loops = leftSelfLoopByTarget[tgtKey];
+    if (!loops || !loops.length) return;
+
+    // Consider all circular links that target this node (including both top/bottom),
+    // but only push non-self links.
+    var incoming = graph.links.filter(function(l) {
+      if (!l || !l.circular || l.isVirtual) return false;
+      if (!l.circularPathData || typeof l.circularPathData.leftLargeArcRadius !== "number") return false;
+      return id(l.target) === tgtKey && !selfLinking(l, id);
+    });
+    if (!incoming.length) return;
+
+    // Iterate a bit because pushing one link can change ordering / create new tight pairs.
+    var maxIters = 10;
+    for (var it = 0; it < maxIters; it++) {
+      var changed = false;
+
+      for (var li = 0; li < loops.length; li++) {
+        var loop = loops[li];
+        if (!loop || !loop.circularPathData) continue;
+        var loopW = loop.width || 0;
+        var loopYMin = Math.min(loop.circularPathData.targetY, loop.circularPathData.verticalLeftInnerExtent);
+        var loopYMax = Math.max(loop.circularPathData.targetY, loop.circularPathData.verticalLeftInnerExtent);
+
+        for (var oi = 0; oi < incoming.length; oi++) {
+          var other = incoming[oi];
+          if (!other || !other.circularPathData) continue;
+
+          var otherYMin = Math.min(other.circularPathData.targetY, other.circularPathData.verticalLeftInnerExtent);
+          var otherYMax = Math.max(other.circularPathData.targetY, other.circularPathData.verticalLeftInnerExtent);
+          var vOv = Math.max(0, Math.min(loopYMax, otherYMax) - Math.max(loopYMin, otherYMin));
+          if (vOv <= 1e-6) continue;
+
+          var otherW = other.width || 0;
+          var required = circularLinkGap || 0;
+          // Gap between the loop's left edge and the other's right edge.
+          var current =
+            (loop.circularPathData.leftFullExtent - loopW / 2) -
+            (other.circularPathData.leftFullExtent + otherW / 2);
+
+          if (current < required) {
+            var delta = (required - current) + 1e-6;
+            other.circularPathData.leftLargeArcRadius += delta;
+            if (typeof other.circularPathData.leftSmallArcRadius === "number") {
+              other.circularPathData.leftSmallArcRadius += delta;
+              if (other.circularPathData.leftSmallArcRadius > other.circularPathData.leftLargeArcRadius) {
+                other.circularPathData.leftSmallArcRadius = other.circularPathData.leftLargeArcRadius;
+              }
+            }
+            other.circularPathData.leftFullExtent =
+              other.circularPathData.targetX -
+              other.circularPathData.leftLargeArcRadius -
+              (other.circularPathData.leftNodeBuffer || 0);
+            changed = true;
+          }
+        }
+      }
+
+      if (!changed) break;
+    }
+  });
+
+  // Pre-pass: ensure self-loops do not overlap other circular links on the LEFT vertical leg
+  // within the same target column, even when they target different nodes.
+  //
+  // This specifically addresses same-column cycles where a TOP link's target-side left leg can
+  // span a large Y range and visually merge with a BOTTOM self-loop's left leg in the same column
+  // (e.g. listing ○→filter vs listing ○→listing ○).
+  //
+  // Scope:
+  // - group by target column
+  // - only when there is a self-loop in that column
+  // - only for OTHER links that target a different node than the loop (cross-node)
+  // - only when their left-leg segments overlap in Y (targetY ↔ verticalLeftInnerExtent)
+  // - never inflate the self-loop; instead push the OTHER link further LEFT
+  var selfLoopsByTargetCol = {};
+  graph.links.forEach(function(l) {
+    if (!l || !l.circular || l.isVirtual) return;
+    if (!selfLinking(l, id)) return;
+    if (!l.circularPathData || typeof l.circularPathData.leftLargeArcRadius !== "number") return;
+    var col = l.target && typeof l.target.column === "number" ? String(l.target.column) : null;
+    if (!col) return;
+    if (!selfLoopsByTargetCol[col]) selfLoopsByTargetCol[col] = [];
+    selfLoopsByTargetCol[col].push(l);
+  });
+
+  function _leftLegSeg(link) {
+    var c = link.circularPathData;
+    var a = c.targetY;
+    var b = c.verticalLeftInnerExtent;
+    return [Math.min(a, b), Math.max(a, b)];
+  }
+
+  Object.keys(selfLoopsByTargetCol).forEach(function(col) {
+    var loops = selfLoopsByTargetCol[col];
+    if (!loops || !loops.length) return;
+    // All circular links in this target column (both top + bottom), excluding self-loops.
+    var group = graph.links.filter(function(l) {
+      if (!l || !l.circular || l.isVirtual) return false;
+      if (!l.circularPathData || typeof l.circularPathData.leftLargeArcRadius !== "number") return false;
+      var ccol = l.target && typeof l.target.column === "number" ? String(l.target.column) : null;
+      return ccol === col && !selfLinking(l, id);
+    });
+    if (!group.length) return;
+
+    var maxIters = 10;
+    for (var it = 0; it < maxIters; it++) {
+      var changed = false;
+      for (var li = 0; li < loops.length; li++) {
+        var loop = loops[li];
+        if (!loop || !loop.circularPathData) continue;
+        var loopSeg = _leftLegSeg(loop);
+        var loopW = loop.width || 0;
+        var loopTgtId = loop.target ? id(loop.target) : null;
+
+        for (var gi = 0; gi < group.length; gi++) {
+          var other = group[gi];
+          if (!other || !other.circularPathData) continue;
+          if (loopTgtId && other.target && id(other.target) === loopTgtId) continue; // cross-node only
+
+          var otherSeg = _leftLegSeg(other);
+          var vOv = Math.max(0, Math.min(loopSeg[1], otherSeg[1]) - Math.max(loopSeg[0], otherSeg[0]));
+          if (vOv <= 1e-6) continue;
+
+          // Ensure OTHER is to the LEFT of LOOP by >= circularGap.
+          // NOTE: current is edge-to-edge already (we subtract +/- width/2), so don't add widths again.
+          var otherW = other.width || 0;
+          var required = circularLinkGap || 0;
+          var current =
+            (loop.circularPathData.leftFullExtent - loopW / 2) -
+            (other.circularPathData.leftFullExtent + otherW / 2);
+          if (current < required) {
+            var delta = (required - current) + 1e-6;
+            other.circularPathData.leftLargeArcRadius += delta;
+            if (typeof other.circularPathData.leftSmallArcRadius === "number") {
+              other.circularPathData.leftSmallArcRadius += delta;
+              if (other.circularPathData.leftSmallArcRadius > other.circularPathData.leftLargeArcRadius) {
+                other.circularPathData.leftSmallArcRadius = other.circularPathData.leftLargeArcRadius;
+              }
+            }
+            other.circularPathData.leftFullExtent =
+              other.circularPathData.targetX -
+              other.circularPathData.leftLargeArcRadius -
+              (other.circularPathData.leftNodeBuffer || 0);
+            changed = true;
+          }
+        }
+      }
+      if (!changed) break;
     }
   });
 
@@ -1799,10 +2302,12 @@ function circularLinksActuallyCross(link1, link2) {
     sameNode(link1.target, link2.target);
   
   // Special case: "zero-span" (source.column === target.column) but NOT self-link
-  // (source node !== target node). These are very compact local loops and should
-  // NOT be forced to stack against every link whose column-range includes this column.
-  // They only need stacking against links that actually start/end in this column
-  // (i.e. could share the same vertical leg region).
+  // (source node !== target node). These are very compact local loops.
+  //
+  // Key point: they should NOT be forced to stack against every link that merely has an
+  // endpoint in this column. In practice, a zero-span non-self link only meaningfully
+  // interacts with links that share the SAME endpoint node (same source node => right side,
+  // same target node => left side) or with true self-loops in this column.
   var link1ZeroSpanNonSelf =
     link1Source === link1Target && link1.source !== link1.target;
   var link2ZeroSpanNonSelf =
@@ -1811,10 +2316,28 @@ function circularLinksActuallyCross(link1, link2) {
   if (link1ZeroSpanNonSelf) {
     var col = link1Source;
     if (!(link2Source === col || link2Target === col)) return false;
+    // If link2 doesn't share a node with the zero-span link AND is not a self-loop,
+    // treat it as non-crossing. This prevents large, unnecessary verticalBuffer stacking
+    // between unrelated same-column cycles and long links in the same column.
+    if (!shareNode && !link2SelfLoop) return false;
+    // If they only share a node in an opposite-side way (one's source is the other's target),
+    // they generally don't intersect: one is leaving the node (right side) while the other is entering (left side).
+    // Keep them unstacked to avoid large vertical holes.
+    if (shareNode && !link2SelfLoop) {
+      var sameSideShare =
+        sameNode(link1.source, link2.source) || sameNode(link1.target, link2.target);
+      if (!sameSideShare) return false;
+    }
   }
   if (link2ZeroSpanNonSelf) {
     var col2 = link2Source;
     if (!(link1Source === col2 || link1Target === col2)) return false;
+    if (!shareNode && !link1SelfLoop) return false;
+    if (shareNode && !link1SelfLoop) {
+      var sameSideShare2 =
+        sameNode(link2.source, link1.source) || sameNode(link2.target, link1.target);
+      if (!sameSideShare2) return false;
+    }
   }
 
   // Calculate horizontal ranges

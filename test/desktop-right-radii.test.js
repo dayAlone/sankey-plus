@@ -171,4 +171,371 @@ test("desktop: filter backlinks should not overlap each other on the same bottom
   );
 });
 
+test("desktop: search ◐→search ○ stays compact (no huge sideways push)", () => {
+  const chart = makeDesktopChart();
+  const baseRadius = 5; // matches links.baseRadius
+  const maxExtra = 6; // allow some bundling slack on the right side
+
+  const link = chart.graph.links.find((l) => l.source?.name === "search ◐" && l.target?.name === "search ○");
+  assert.ok(link, "Missing search ◐→search ○");
+  assert.ok(link.circular, "Expected link to be circular");
+
+  const c = link.circularPathData;
+  assert.ok(c, "Missing circularPathData");
+
+  const expected = baseRadius + link.width / 2;
+  assert.ok(
+    c.rightLargeArcRadius <= expected + maxExtra,
+    `Expected search ◐→search ○ right radius to stay compact: got ${c.rightLargeArcRadius.toFixed(
+      3
+    )}, expected <= ${(expected + maxExtra).toFixed(3)}`
+  );
+
+  // Left side can legitimately expand to clear the target-node self-loop (search ○→search ○)
+  // when their left-leg segments overlap. Bound it to "just enough for loop clearance".
+  const loop = chart.graph.links.find((l) => l.source?.name === "search ○" && l.target?.name === "search ○");
+  if (loop && loop.circular) {
+    const lc = loop.circularPathData;
+    const segA = [Math.min(c.targetY, c.verticalLeftInnerExtent), Math.max(c.targetY, c.verticalLeftInnerExtent)];
+    const segB = [
+      Math.min(lc.targetY, lc.verticalLeftInnerExtent),
+      Math.max(lc.targetY, lc.verticalLeftInnerExtent),
+    ];
+    const ov = Math.max(0, Math.min(segA[1], segB[1]) - Math.max(segA[0], segB[0]));
+    if (ov > 1e-6) {
+      const maxLeft = expected + loop.width + 1; // loop width + circularGap
+      assert.ok(
+        c.leftLargeArcRadius <= maxLeft + 1e-3,
+        `Expected search ◐→search ○ left radius to be only as large as needed to clear loop: got ${c.leftLargeArcRadius.toFixed(
+          3
+        )}, expected <= ${maxLeft.toFixed(3)}`
+      );
+    }
+  }
+});
+
+test("desktop: filter→listing ○ should not overlap filter→saved_filters_search ● on the right leg", () => {
+  const chart = makeDesktopChart();
+  const gap = 1;
+
+  const a = chart.graph.links.find((l) => l.source?.name === "filter" && l.target?.name === "listing ○");
+  const b = chart.graph.links.find(
+    (l) => l.source?.name === "filter" && l.target?.name === "saved_filters_search ●"
+  );
+  assert.ok(a && b, "Missing expected links");
+  assert.ok(a.circular && b.circular, "Expected both links to be circular");
+  assert.equal(a.circularLinkType, "top");
+  assert.equal(b.circularLinkType, "top");
+
+  // Right-leg Y overlap (use actual port y0), consistent with the right-leg clearance pass.
+  function rightLegYRange(link) {
+    const c = link.circularPathData;
+    assert.ok(c, "Missing circularPathData");
+    if (link.circularLinkType === "top") return [c.verticalFullExtent, link.y0];
+    return [link.y0, c.verticalFullExtent];
+  }
+  function yOverlap(a, b) {
+    const [a0, a1] = rightLegYRange(a);
+    const [b0, b1] = rightLegYRange(b);
+    return Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
+  }
+
+  const ov = yOverlap(a, b);
+  assert.ok(ov > 1e-6, "Expected vertical overlap on the right leg for this regression");
+
+  const inner = a.circularPathData.rightFullExtent <= b.circularPathData.rightFullExtent ? a : b;
+  const outer = inner === a ? b : a;
+  const xGap =
+    (outer.circularPathData.rightFullExtent - outer.width / 2) -
+    (inner.circularPathData.rightFullExtent + inner.width / 2);
+  assert.ok(
+    xGap >= gap - 1e-5,
+    `Expected right-leg clearance >=${gap}px, got ${xGap.toFixed(3)}px`
+  );
+});
+
+test("desktop: filter→listing ○ should stay inside filter→saved_filters_search ● on right leg (ordering)", () => {
+  const chart = makeDesktopChart();
+
+  const a = chart.graph.links.find((l) => l.source?.name === "filter" && l.target?.name === "listing ○");
+  const b = chart.graph.links.find(
+    (l) => l.source?.name === "filter" && l.target?.name === "saved_filters_search ●"
+  );
+  assert.ok(a && b, "Missing expected links");
+  assert.ok(a.circular && b.circular, "Expected both links to be circular");
+  assert.equal(a.circularLinkType, "top");
+  assert.equal(b.circularLinkType, "top");
+
+  // filter→listing ○ is span=0 (same column). filter→saved_filters_search ● is span=1.
+  // Span=0 should remain more inner on the right leg.
+  assert.ok(
+    a.circularPathData.rightFullExtent <= b.circularPathData.rightFullExtent - 1e-6,
+    `Expected filter→listing ○ to be inside filter→saved_filters_search ● on right leg: rfeA=${a.circularPathData.rightFullExtent.toFixed(
+      3
+    )} > rfeB=${b.circularPathData.rightFullExtent.toFixed(3)}`
+  );
+});
+
+test("desktop: right-leg ordering (column 4): filter→listing ○ then listing ○→search ● then listing ○→saved_filters_search ●; other top backlinks after", () => {
+  const chart = makeDesktopChart();
+  const eps = 1e-3;
+
+  const filterToListing = chart.graph.links.find((l) => l.source?.name === "filter" && l.target?.name === "listing ○");
+  const listingSaved = chart.graph.links.find(
+    (l) => l.source?.name === "listing ○" && l.target?.name === "saved_filters_search ●"
+  );
+  const listingSearch = chart.graph.links.find(
+    (l) => l.source?.name === "listing ○" && l.target?.name === "search ●"
+  );
+  const filterToSearch = chart.graph.links.find((l) => l.source?.name === "filter" && l.target?.name === "search ◐");
+  const filterToSaved = chart.graph.links.find(
+    (l) => l.source?.name === "filter" && l.target?.name === "saved_filters_search ●"
+  );
+
+  assert.ok(filterToListing && listingSaved && listingSearch && filterToSearch && filterToSaved, "Missing expected links");
+  assert.ok(
+    filterToListing.circular &&
+      listingSaved.circular &&
+      listingSearch.circular &&
+      filterToSearch.circular &&
+      filterToSaved.circular,
+    "Expected circular links"
+  );
+
+  const filterListingRfe = filterToListing.circularPathData.rightFullExtent;
+  const savedRfe = listingSaved.circularPathData.rightFullExtent;
+  const searchRfe = listingSearch.circularPathData.rightFullExtent;
+  const filterSearchRfe = filterToSearch.circularPathData.rightFullExtent;
+  const filterSavedRfe = filterToSaved.circularPathData.rightFullExtent;
+
+  assert.ok(
+    filterListingRfe <= searchRfe - eps,
+    `Expected filter→listing ○ to be before listing ○→search ● (filterListing=${filterListingRfe.toFixed(
+      3
+    )}, search=${searchRfe.toFixed(3)})`
+  );
+  assert.ok(
+    searchRfe <= savedRfe - eps,
+    `Expected listing ○→search ● to be before listing ○→saved_filters_search ● (search=${searchRfe.toFixed(
+      3
+    )}, saved=${savedRfe.toFixed(3)})`
+  );
+  assert.ok(
+    savedRfe <= filterSearchRfe - eps,
+    `Expected listing ○→saved_filters_search ● to be before filter→search ◐ (saved=${savedRfe.toFixed(
+      3
+    )}, filterSearch=${filterSearchRfe.toFixed(3)})`
+  );
+  assert.ok(
+    savedRfe <= filterSavedRfe - eps,
+    `Expected listing ○→saved_filters_search ● to be before filter→saved_filters_search ● (saved=${savedRfe.toFixed(
+      3
+    )}, filterSaved=${filterSavedRfe.toFixed(3)})`
+  );
+});
+
+test("desktop: search ○ self-loop should not overlap incoming bottom link on left leg (search ◐→search ○)", () => {
+  const chart = makeDesktopChart();
+  const gap = 1;
+
+  const other = chart.graph.links.find((l) => l.source?.name === "search ◐" && l.target?.name === "search ○");
+  const loop = chart.graph.links.find((l) => l.source?.name === "search ○" && l.target?.name === "search ○");
+  assert.ok(other && loop, "Missing expected links");
+  assert.ok(other.circular && loop.circular, "Expected both links to be circular");
+  assert.equal(other.circularLinkType, "bottom");
+  assert.equal(loop.circularLinkType, "bottom");
+
+  function leftLegSeg(link) {
+    const c = link.circularPathData;
+    assert.ok(c, "Missing circularPathData");
+    return [Math.min(c.targetY, c.verticalLeftInnerExtent), Math.max(c.targetY, c.verticalLeftInnerExtent)];
+  }
+  function yOverlap(a, b) {
+    const [a0, a1] = leftLegSeg(a);
+    const [b0, b1] = leftLegSeg(b);
+    return Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
+  }
+
+  const ov = yOverlap(other, loop);
+  assert.ok(ov > 1e-6, "Expected vertical overlap on the left leg for this regression");
+
+  // other must be left of (outside) the loop by >= circularGap.
+  const xGap =
+    (loop.circularPathData.leftFullExtent - loop.width / 2) -
+    (other.circularPathData.leftFullExtent + other.width / 2);
+  assert.ok(
+    xGap >= gap - 1e-5,
+    `Expected left-leg clearance >=${gap}px, got ${xGap.toFixed(3)}px`
+  );
+});
+
+test("desktop: filter self-loop should not overlap incoming bottom link on left leg (filter off→filter)", () => {
+  const chart = makeDesktopChart();
+  const gap = 1;
+
+  const other = chart.graph.links.find((l) => l.source?.name === "filter off" && l.target?.name === "filter");
+  const loop = chart.graph.links.find((l) => l.source?.name === "filter" && l.target?.name === "filter");
+  assert.ok(other && loop, "Missing expected links");
+  assert.ok(other.circular && loop.circular, "Expected both links to be circular");
+  assert.equal(other.circularLinkType, "bottom");
+  assert.equal(loop.circularLinkType, "bottom");
+
+  function leftLegSeg(link) {
+    const c = link.circularPathData;
+    assert.ok(c, "Missing circularPathData");
+    return [Math.min(c.targetY, c.verticalLeftInnerExtent), Math.max(c.targetY, c.verticalLeftInnerExtent)];
+  }
+  function yOverlap(a, b) {
+    const [a0, a1] = leftLegSeg(a);
+    const [b0, b1] = leftLegSeg(b);
+    return Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
+  }
+
+  const ov = yOverlap(other, loop);
+  assert.ok(ov > 1e-6, "Expected vertical overlap on the left leg for this regression");
+
+  const xGap =
+    (loop.circularPathData.leftFullExtent - loop.width / 2) -
+    (other.circularPathData.leftFullExtent + other.width / 2);
+  assert.ok(
+    xGap >= gap - 1e-5,
+    `Expected left-leg clearance >=${gap}px, got ${xGap.toFixed(3)}px`
+  );
+});
+
+test("desktop: listing ○ self-loop should not overlap filter→listing ○ on right leg (same source column cross-band)", () => {
+  const chart = makeDesktopChart();
+  const gap = 1;
+
+  const other = chart.graph.links.find((l) => l.source?.name === "filter" && l.target?.name === "listing ○");
+  const loop = chart.graph.links.find((l) => l.source?.name === "listing ○" && l.target?.name === "listing ○");
+  assert.ok(other && loop, "Missing expected links");
+  assert.ok(other.circular && loop.circular, "Expected both links to be circular");
+
+  function rightLegSeg(link) {
+    const c = link.circularPathData;
+    assert.ok(c, "Missing circularPathData");
+    return [
+      Math.min(c.sourceY, c.verticalRightInnerExtent),
+      Math.max(c.sourceY, c.verticalRightInnerExtent),
+    ];
+  }
+  function yOverlap(a, b) {
+    const [a0, a1] = rightLegSeg(a);
+    const [b0, b1] = rightLegSeg(b);
+    return Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
+  }
+
+  const ov = yOverlap(other, loop);
+  assert.ok(ov > 1e-6, "Expected right-leg vertical overlap for this regression");
+
+  // Ensure OTHER is to the right of LOOP by >= circularGap.
+  const xGap =
+    (other.circularPathData.rightFullExtent - other.width / 2) -
+    (loop.circularPathData.rightFullExtent + loop.width / 2);
+  assert.ok(
+    xGap >= gap - 1e-5,
+    `Expected right-leg clearance >=${gap}px, got ${xGap.toFixed(3)}px`
+  );
+});
+
+test("desktop: sosisa ◐ self-loop should not overlap listing ●→schedule ○ on right leg (same source column cross-band)", () => {
+  const chart = makeDesktopChart();
+  const gap = 1;
+
+  const other = chart.graph.links.find((l) => l.source?.name === "listing ●" && l.target?.name === "schedule ○");
+  const loop = chart.graph.links.find((l) => l.source?.name === "sosisa ◐" && l.target?.name === "sosisa ◐");
+  assert.ok(other && loop, "Missing expected links");
+  assert.ok(other.circular && loop.circular, "Expected both links to be circular");
+
+  function rightLegSeg(link) {
+    const c = link.circularPathData;
+    assert.ok(c, "Missing circularPathData");
+    return [
+      Math.min(c.sourceY, c.verticalRightInnerExtent),
+      Math.max(c.sourceY, c.verticalRightInnerExtent),
+    ];
+  }
+  function yOverlap(a, b) {
+    const [a0, a1] = rightLegSeg(a);
+    const [b0, b1] = rightLegSeg(b);
+    return Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
+  }
+
+  const ov = yOverlap(other, loop);
+  assert.ok(ov > 1e-6, "Expected right-leg vertical overlap for this regression");
+
+  const xGap =
+    (other.circularPathData.rightFullExtent - other.width / 2) -
+    (loop.circularPathData.rightFullExtent + loop.width / 2);
+  assert.ok(
+    xGap >= gap - 1e-5,
+    `Expected right-leg clearance >=${gap}px, got ${xGap.toFixed(3)}px`
+  );
+});
+
+test("desktop: listing ○ self-loop should not overlap listing ○→filter on left leg (same target column cross-node)", () => {
+  const chart = makeDesktopChart();
+  const gap = 1;
+  const slack = 0.25;
+
+  const other = chart.graph.links.find((l) => l.source?.name === "listing ○" && l.target?.name === "filter");
+  const loop = chart.graph.links.find((l) => l.source?.name === "listing ○" && l.target?.name === "listing ○");
+  assert.ok(other && loop, "Missing expected links");
+  assert.ok(other.circular && loop.circular, "Expected both links to be circular");
+
+  function leftLegSeg(link) {
+    const c = link.circularPathData;
+    assert.ok(c, "Missing circularPathData");
+    return [
+      Math.min(c.targetY, c.verticalLeftInnerExtent),
+      Math.max(c.targetY, c.verticalLeftInnerExtent),
+    ];
+  }
+  function yOverlap(a, b) {
+    const [a0, a1] = leftLegSeg(a);
+    const [b0, b1] = leftLegSeg(b);
+    return Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
+  }
+
+  const ov = yOverlap(other, loop);
+  assert.ok(ov > 1e-6, "Expected left-leg vertical overlap for this regression");
+
+  // Ensure OTHER is to the left of LOOP by >= circularGap.
+  const xGap =
+    (loop.circularPathData.leftFullExtent - loop.width / 2) -
+    (other.circularPathData.leftFullExtent + other.width / 2);
+  assert.ok(
+    xGap >= gap - 1e-5,
+    `Expected left-leg clearance >=${gap}px, got ${xGap.toFixed(3)}px`
+  );
+  // Regression: we want the gap to be approximately circularGap (not circularGap + stroke widths).
+  assert.ok(
+    xGap <= gap + slack,
+    `Expected left-leg clearance not to over-shoot by much (<=${(gap + slack).toFixed(2)}px), got ${xGap.toFixed(3)}px`
+  );
+});
+
+test("desktop: same-column cycle filter↔listing ○ should not have excessive top vertical separation", () => {
+  const chart = makeDesktopChart();
+  const gap = 1;
+
+  const a = chart.graph.links.find((l) => l.source?.name === "filter" && l.target?.name === "listing ○");
+  const b = chart.graph.links.find((l) => l.source?.name === "listing ○" && l.target?.name === "filter");
+  assert.ok(a && b, "Missing expected cycle links");
+  assert.ok(a.circular && b.circular, "Expected both links to be circular");
+  assert.equal(a.circularLinkType, "top");
+  assert.equal(b.circularLinkType, "top");
+
+  const dy = Math.abs(a.circularPathData.verticalFullExtent - b.circularPathData.verticalFullExtent);
+  const minDy = (a.width + b.width) / 2 + gap;
+  // Allow some slack for interactions with nearby bundles, but prevent the huge hole regression.
+  assert.ok(
+    dy <= minDy + 6,
+    `Expected filter→listing ○ and listing ○→filter to be reasonably close: dy=${dy.toFixed(
+      3
+    )}px, minDy=${minDy.toFixed(3)}px`
+  );
+});
+
 

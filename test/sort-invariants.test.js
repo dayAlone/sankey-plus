@@ -498,11 +498,9 @@ test("circular links from same source column maintain horizontal clearance at ri
 
   // Helper: get Y range on right leg
   function getYRange(link) {
-    if (link.circularLinkType === 'top') {
-      return [link.circularPathData.verticalFullExtent, link.source.y0];
-    } else {
-      return [link.source.y1, link.circularPathData.verticalFullExtent];
-    }
+    // Use actual source port position (link.y0), consistent with the right-leg clearance pass.
+    if (link.circularLinkType === 'top') return [link.circularPathData.verticalFullExtent, link.y0];
+    return [link.y0, link.circularPathData.verticalFullExtent];
   }
 
   // Helper: check if two Y ranges overlap
